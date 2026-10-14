@@ -56,6 +56,11 @@ class Engine:
         self.last_prune = 0
         self.last_daily = None
         self.mute_until = 0
+        self.last_periodic = 0
+        self.periodic_busy = False
+        self.periodic_ai_text = None
+        self.periodic_ai_ts = 0
+        self.periodic_ai_keys = frozenset()
         self.started_at = time.time()
         self.running = False
 
@@ -384,6 +389,59 @@ class Engine:
             if now - self.started_at > 600:  # tránh gửi ngay khi vừa khởi động
                 self.last_daily = today
                 self.outbox.submit(self._send_daily_report)
+
+        every = config.PERIODIC_REPORT_SEC
+        if every > 0 and now - self.last_periodic >= every and not self.periodic_busy:
+            if now >= self.mute_until:
+                self.last_periodic, self.periodic_busy = now, True
+                self.outbox.submit(self._send_periodic_report)
+
+    def _periodic_ai(self, analysis):
+        """Nhận định AI cho tin định kỳ: viết lại mỗi PERIODIC_AI_MIN phút hoặc khi danh sách vấn đề đổi."""
+        if not llm.status()["enabled"]:
+            return None
+        keys = frozenset(f["key"] for f in analysis["findings"])
+        stale = time.time() - self.periodic_ai_ts >= config.PERIODIC_AI_MIN * 60
+        if self.periodic_ai_text is None or stale or keys != self.periodic_ai_keys:
+            text = llm.ask(
+                "Viết 'Nhận định AI' cho tin Zalo định kỳ về nhà nấm: tối đa 4 dòng, mỗi dòng bắt đầu bằng '•'. "
+                "Nêu tình trạng chung, vấn đề đáng lo nhất (nếu có) và 1-2 việc nên làm. Không chào hỏi, "
+                "không liệt kê lại toàn bộ số liệu.",
+                self.context(), effort="low", max_tokens=1500,
+            )
+            if text:
+                self.periodic_ai_text, self.periodic_ai_ts, self.periodic_ai_keys = text, time.time(), keys
+        return self.periodic_ai_text
+
+    def _send_periodic_report(self):
+        try:
+            with self.lock:
+                analysis, data = self.analysis, self.latest_data or {}
+            if not analysis:
+                return
+            health = analysis["health"]
+            devices = " | ".join(
+                f"{name} {'🟢' if num(data.get(key)) == 1 else '⚪'}"
+                for key, name in (("BOM", "Bơm"), ("DEN", "Đèn"), ("QUAT", "Quạt"), ("SUONG", "Sương"))
+            )
+            door = "Mở" if num(data.get("MO")) == 1 else "Đóng" if num(data.get("DONG")) == 1 else "—"
+            lines = [
+                f"🍄 NHÀ NẤM — {health['score']}/100 ({health['label']})",
+                self.readings_line(),
+                f"🔧 {devices} | Màn che: {door}",
+            ]
+            important = [f for f in analysis["findings"] if SEV_RANK[f["severity"]] >= 2]
+            if important:
+                lines.append("⚠️ " + "; ".join(f["title"] for f in important[:3]))
+            ai = self._periodic_ai(analysis)
+            if ai:
+                age = int((time.time() - self.periodic_ai_ts) / 60)
+                lines.append(f"\n🧠 Nhận định AI ({'vừa cập nhật' if age < 1 else f'{age} phút trước'}):\n{ai}")
+            self.zalo.send("\n".join(lines) + f"\n🕒 {now_text()}")
+        except Exception:
+            log.exception("Lỗi gửi báo cáo định kỳ")
+        finally:
+            self.periodic_busy = False
 
     def _send_daily_report(self):
         try:

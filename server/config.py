@@ -87,6 +87,8 @@ NOTIFY_MANUAL_CHANGES = _bool("NOTIFY_MANUAL_CHANGES", True)
 DEVICE_NOTIFY_MIN = _float("DEVICE_NOTIFY_MIN", 5)  # mỗi thiết bị báo Zalo tối đa 1 lần / N phút
 ALERT_REPEAT_MIN = _float("ALERT_REPEAT_MIN", 30)
 DAILY_REPORT_HOUR = _int("DAILY_REPORT_HOUR", 7)  # -1 để tắt
+PERIODIC_REPORT_SEC = _int("PERIODIC_REPORT_SEC", 15)  # gửi tình trạng định kỳ qua Zalo, 0 = tắt
+PERIODIC_AI_MIN = _float("PERIODIC_AI_MIN", 5)  # nhận định AI trong tin định kỳ viết lại sau N phút
 HISTORY_RETENTION_DAYS = _int("HISTORY_RETENTION_DAYS", 30)
 
 DB_PATH = SERVER_DIR / "data" / "greenhouse.db"

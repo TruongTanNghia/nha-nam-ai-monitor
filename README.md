@@ -67,7 +67,7 @@ Mặc định máy chủ AI **chỉ giám sát**: khi ESP32 tự bật/tắt thi
 Nếu dùng firmware **không** tự điều khiển, đặt `AUTO_CONTROL_ENABLED=true` để máy chủ điều khiển thay (cùng luật với firmware, thêm vùng trễ, ngắt bảo vệ bơm/phun sương sau `PUMP_MAX_ON_MIN`/`MIST_MAX_ON_MIN` phút, tắt thiết bị khi cảm biến lỗi). Không bật cùng lúc với firmware tự điều khiển — hai bên sẽ ghi đè nhau.
 
 ### Zalo
-Tự gửi: cảnh báo mới (kèm “Nhận định AI” nếu có LLM), nhắc lại sau `ALERT_REPEAT_MIN` phút nếu chưa xử lý, báo khi đã ổn định, mỗi lần tự bật/tắt thiết bị, khi có người điều khiển từ web, mất kết nối Firebase, báo cáo buổi sáng lúc `DAILY_REPORT_HOUR`.
+Tự gửi: **tình trạng định kỳ mỗi `PERIODIC_REPORT_SEC` giây** (mặc định 15 s) kèm nhận định AI (AI viết lại mỗi `PERIODIC_AI_MIN` phút hoặc khi có vấn đề mới, để không vượt hạn mức LLM), cảnh báo mới (kèm “Nhận định AI” nếu có LLM), nhắc lại sau `ALERT_REPEAT_MIN` phút nếu chưa xử lý, báo khi đã ổn định, mỗi lần tự bật/tắt thiết bị, khi có người điều khiển từ web, mất kết nối Firebase, báo cáo buổi sáng lúc `DAILY_REPORT_HOUR`.
 
 Lệnh (chỉ chat có trong `ZALO_CHAT_IDS`): `/trangthai` `/phantich` `/baocao` `/canhbao` `/auto` `/manual` `/bat quat` `/tat bom` `/tat het` `/mo man` `/dong man` `/im 60` `/batthongbao` `chatid` — hoặc hỏi tự do, AI trả lời dựa trên số liệu.
 
