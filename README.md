@@ -76,7 +76,7 @@ Lệnh (chỉ chat có trong `ZALO_CHAT_IDS`): `/trangthai` `/phantich` `/baocao
 |---|---|
 | Claude | `LLM_PROVIDER=anthropic`, `LLM_API_KEY=sk-ant-...` (mặc định `claude-opus-5-5`) |
 | OpenAI | `LLM_PROVIDER=openai`, `LLM_API_KEY=sk-...` (mặc định `gpt-4o-mini`) |
-| Gemini | `LLM_PROVIDER=openai`, `LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, `LLM_MODEL=gemini-2.5-flash` |
+| Gemini | `LLM_PROVIDER=openai`, `LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, `LLM_MODEL=gemini-3.8-flash` |
 | Groq / DeepSeek / OpenRouter / Ollama | `LLM_PROVIDER=openai` + `LLM_BASE_URL` + `LLM_MODEL` tương ứng |
 
 Không có key → hệ thống dùng tin nhắn mẫu, mọi chức năng khác vẫn chạy.

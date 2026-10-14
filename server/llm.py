@@ -8,6 +8,7 @@ Không có API key -> các hàm trả None và hệ thống dùng mẫu tin so�
 """
 import json
 import logging
+import time
 
 import requests
 
@@ -17,6 +18,7 @@ log = logging.getLogger("llm")
 
 DEFAULT_MODELS = {"anthropic": "claude-opus-5-5", "openai": "gpt-4o-mini"}
 # Model Claude hỗ trợ tự chuyển model dự phòng khi bị từ chối
+RETRYABLE = {429, 500, 502, 503, 504}
 FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
 
 SYSTEM_PROMPT = """Bạn là "Trợ lý Nhà Nấm" — kỹ sư nông nghiệp công nghệ cao, theo dõi một nhà nấm/nhà kính \
@@ -94,24 +96,34 @@ def _call_openai(system, user, max_tokens):
     headers = {"Content-Type": "application/json"}
     if config.LLM_API_KEY:
         headers["Authorization"] = f"Bearer {config.LLM_API_KEY}"
-    body = {
-        "model": model(),
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "max_tokens": max_tokens,
-    }
-    try:
-        res = requests.post(
-            f"{base}/chat/completions", headers=headers, json=body, timeout=config.LLM_TIMEOUT_SEC
-        )
-        res.raise_for_status()
-        return (res.json()["choices"][0]["message"]["content"] or "").strip() or None
-    except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
-        detail = getattr(getattr(exc, "response", None), "text", "")[:300]
-        log.error("LLM (OpenAI-compatible) lỗi: %s %s", exc, detail)
-        return None
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    # Quá tải/giới hạn tốc độ -> thử lại 1 lần, rồi chuyển sang model dự phòng
+    for m in [model()] + [f for f in config.LLM_FALLBACK_MODELS if f != model()]:
+        for attempt in range(2):
+            try:
+                res = requests.post(
+                    f"{base}/chat/completions", headers=headers, timeout=config.LLM_TIMEOUT_SEC,
+                    json={"model": m, "messages": messages, "max_tokens": max_tokens},
+                )
+            except requests.RequestException as exc:
+                log.warning("LLM %s lỗi kết nối: %s", m, exc)
+                break
+            if res.status_code in RETRYABLE:
+                log.warning("LLM %s bận (HTTP %s), lần thử %d", m, res.status_code, attempt + 1)
+                time.sleep(2)
+                continue
+            if not res.ok:
+                log.error("LLM %s lỗi HTTP %s: %s", m, res.status_code, res.text[:300])
+                break
+            try:
+                return (res.json()["choices"][0]["message"]["content"] or "").strip() or None
+            except (KeyError, IndexError, ValueError) as exc:
+                log.error("LLM %s trả dữ liệu lạ: %s", m, exc)
+                break
+    return None
 
 
 def ask(task, context, effort="low", max_tokens=4000):

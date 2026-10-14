@@ -64,7 +64,9 @@ LLM_PROVIDER = _str("LLM_PROVIDER").lower()
 LLM_API_KEY = _str("LLM_API_KEY")
 LLM_MODEL = _str("LLM_MODEL")
 LLM_BASE_URL = _str("LLM_BASE_URL").rstrip("/")
-LLM_TIMEOUT_SEC = _int("LLM_TIMEOUT_SEC", 60)
+# Model dự phòng khi model chính quá tải (chỉ áp dụng API tương thích OpenAI), cách nhau dấu phẩy
+LLM_FALLBACK_MODELS = [m.strip() for m in _str("LLM_FALLBACK_MODELS").split(",") if m.strip()]
+LLM_TIMEOUT_SEC = _int("LLM_TIMEOUT_SEC", 30)
 
 # ---------- Tự động điều khiển ----------
 # Firmware ESP32 đã tự điều khiển ở chế độ AUTO -> server chỉ giám sát (bật lên sẽ ghi đè nhau)
