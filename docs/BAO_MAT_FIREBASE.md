@@ -14,8 +14,10 @@ Firebase Console → **Realtime Database** → **Rules**, dán nội dung [`fire
 ## 3. Cho các thành phần đăng nhập
 | Thành phần | Cách đăng nhập |
 |---|---|
-| **ESP32** | Thư viện Firebase ESP Client: điền `auth.user.email` / `auth.user.password` của tài khoản quản trị |
-| **Máy chủ AI** | Project settings → *Service accounts* → *Database secrets* → copy secret vào `FIREBASE_AUTH=` trong `server/.env` |
+| **ESP32** (`aduno.ino`) | Project settings → *Service accounts* → *Database secrets* → copy secret vào `firebaseAuth = "..."` rồi nạp lại firmware |
+| **Máy chủ AI** | Dán cùng secret đó vào `FIREBASE_AUTH=` trong `server/.env` |
 | **Web** | Cần thêm form đăng nhập (Firebase Auth email/password) — chưa có trong bản này |
 
+> Database secret bỏ qua rules nên ESP32 và máy chủ AI vẫn ghi được. Đừng đưa secret lên GitHub.
+>
 > ⚠️ Sau khi khóa, web hiện tại chỉ **xem** được; nút điều khiển và lưu ngưỡng sẽ báo lỗi cho tới khi web có đăng nhập. Lệnh điều khiển qua **Zalo** vẫn chạy vì đi qua máy chủ AI.

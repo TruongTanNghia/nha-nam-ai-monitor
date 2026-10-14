@@ -333,16 +333,16 @@ class Analyzer:
                         key,
                     ))
 
+        # Độ mặn = 0 là bình thường: firmware ép giá trị < 100 ppm về 0. Độ ẩm đất = 0 thì đáng ngờ.
         win5 = _window(rows, now, 300)
-        for key in ("GT_AMDAT", "GT_DOMAN"):
-            if win5 and all(r.get(key) == 0 for r in win5):
-                findings.append(finding(
-                    f"zero_{key}", "warning", "sensor",
-                    f"Cảm biến {lname(key)} luôn báo 0",
-                    "Giá trị bằng 0 suốt 5 phút — cảm biến có thể chưa cắm, đứt dây hoặc chưa hiệu chuẩn. "
-                    "Kết quả điều khiển liên quan có thể sai.",
-                    key,
-                ))
+        if win5 and all(r.get("GT_AMDAT") == 0 for r in win5):
+            findings.append(finding(
+                "zero_GT_AMDAT", "warning", "sensor",
+                "Cảm biến độ ẩm đất luôn báo 0",
+                "Giá trị bằng 0 suốt 5 phút — cảm biến có thể chưa cắm, đứt dây, nằm ngoài đất hoặc chưa hiệu chuẩn. "
+                "Ở chế độ AUTO, máy bơm sẽ bật liên tục theo số liệu này.",
+                "GT_AMDAT",
+            ))
 
         win10 = _window(rows, now, 600)
         if win10 and len(win10) >= 20:
@@ -357,7 +357,8 @@ class Analyzer:
             else:
                 win60 = _window(rows, now, 3600)
                 for key in ("GT_AMDAT", "GT_DOMAN", "GT_PH"):
-                    if win60 and len({r.get(key) for r in win60}) == 1:
+                    values = {r.get(key) for r in win60} if win60 else set()
+                    if len(values) == 1 and values != {0}:  # 0 đã có luật riêng / là giá trị hợp lệ
                         findings.append(finding(
                             f"stuck_{key}", "info", "sensor",
                             f"Cảm biến {lname(key)} có thể bị treo",
@@ -459,16 +460,32 @@ class Analyzer:
                 "Hai tín hiệu MO và DONG cùng bằng 1 — động cơ có thể bị kẹt. Hãy chọn lại một trạng thái.",
             ))
 
+        auto = num(data.get("MODE")) == 1
         for dev, limit, name in (
             ("BOM", config.PUMP_MAX_ON_MIN, "Máy bơm"),
             ("SUONG", config.MIST_MAX_ON_MIN, "Phun sương"),
         ):
+            if auto and config.AUTO_CONTROL_ENABLED:
+                continue  # máy chủ AI tự ngắt bảo vệ
             start = _on_since(rows, dev, need_seen_off=False)
-            if start and mins(start) >= limit and num(data.get("MODE")) != 1:
+            if start and mins(start) >= limit:
                 out.append(finding(
-                    f"device_{dev}_long_manual", "warning", "device",
+                    f"device_{dev}_long_run", "warning", "device",
                     f"{name} bật liên tục {mins(start):.0f} phút",
-                    "Đang ở chế độ thủ công — có thể quên tắt. Gửi lệnh /tat để tắt từ Zalo.",
+                    "ESP32 đang AUTO nhưng chỉ số chưa đạt ngưỡng — kiểm tra nguồn nước, cảm biến và ngưỡng cài đặt."
+                    if auto else "Đang ở chế độ thủ công — có thể quên tắt. Gửi lệnh /tat để tắt từ Zalo.",
+                ))
+
+        # Bật/tắt liên tục (ESP32 không có vùng trễ quanh ngưỡng)
+        win = [r for r in rows if r["ts"] >= now - 600]
+        for dev, name in (("BOM", "Máy bơm"), ("DEN", "Đèn"), ("QUAT", "Quạt"), ("SUONG", "Phun sương"), ("MO", "Màn che")):
+            toggles = sum(1 for a, b in zip(win, win[1:]) if a.get(dev) != b.get(dev))
+            if toggles >= 6:
+                out.append(finding(
+                    f"device_{dev}_chatter", "warning", "device",
+                    f"{name} bật/tắt liên tục",
+                    f"Đổi trạng thái {toggles} lần trong 10 phút — giá trị cảm biến đang dao động sát ngưỡng. "
+                    "Nên chỉnh ngưỡng hoặc thêm vùng trễ trong firmware để bảo vệ thiết bị.",
                 ))
         return out
 

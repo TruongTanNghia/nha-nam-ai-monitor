@@ -1,10 +1,14 @@
-"""Tự động bật/tắt thiết bị theo ngưỡng (chế độ AUTO) — chạy trên server 24/7.
+"""Tự động bật/tắt thiết bị theo ngưỡng từ máy chủ AI.
 
-So với logic cũ trong trình duyệt, bổ sung:
+MẶC ĐỊNH TẮT (AUTO_CONTROL_ENABLED=false): firmware ESP32 đã tự chạy chế độ AUTO và ghi trạng thái
+thiết bị lên Firebase — nếu server cũng điều khiển thì hai bên sẽ ghi đè nhau.
+Chỉ bật khi firmware KHÔNG tự điều khiển. Luật giống firmware, bổ sung:
 - Vùng trễ (hysteresis) để thiết bị không bật/tắt liên tục quanh ngưỡng.
 - Thời gian tối thiểu giữa 2 lần đảo trạng thái.
 - Giới hạn thời gian chạy liên tục của bơm/phun sương, sau đó nghỉ bắt buộc.
 - Cảm biến lỗi -> tắt thiết bị liên quan thay vì chạy theo số liệu sai.
+
+`explain_auto` dùng cả khi tắt: giải thích vì sao ESP32 vừa bật/tắt thiết bị.
 """
 import logging
 import time
@@ -15,6 +19,46 @@ from sensors import MODE_AUTO, fmt, is_valid, lname, num, thresholds
 log = logging.getLogger("controller")
 
 WATER_LIMITS = {"BOM": config.PUMP_MAX_ON_MIN, "SUONG": config.MIST_MAX_ON_MIN}
+
+
+def _compare(key, value, setting):
+    sign = "<" if value < setting else ">" if value > setting else "="
+    return f"{lname(key)} {fmt(key, value)} {sign} ngưỡng {fmt(key, setting)}"
+
+
+def _light_reason(light, setting):
+    return _compare("ANHSANG", light, setting)
+
+
+def _interlock_reason(data, th):
+    """Điều kiện ép tắt của firmware: {'BOM': lý do, 'SUONG': lý do}."""
+    out = {}
+    ph, sal = num(data.get("GT_PH")), num(data.get("GT_DOMAN"))
+    lo, hi = th["SET_PHLOW"] or 0, th["SET_PHHIGH"] or 0
+    if ph is not None and (ph < lo or ph > hi):
+        out["BOM"] = out["SUONG"] = f"pH {fmt('GT_PH', ph)} ngoài khoảng {lo:g}–{hi:g}"
+    elif sal is not None and th["SET_DOMAN"] is not None and sal > th["SET_DOMAN"]:
+        out["BOM"] = _compare("GT_DOMAN", sal, th["SET_DOMAN"]) + " — ngắt bơm"
+    return out
+
+
+def explain_auto(device, value, data):
+    """Giải thích vì sao firmware ESP32 (chế độ AUTO) vừa bật/tắt thiết bị."""
+    th = thresholds(data)
+    v = {k: num(data.get(k)) for k in ("t", "h", "ANHSANG", "GT_AMDAT")}
+    if device in ("BOM", "SUONG") and not value:
+        reason = _interlock_reason(data, th).get(device)
+        if reason:
+            return reason
+    pairs = {
+        "BOM": ("GT_AMDAT", "SET_AMDAT"), "SUONG": ("h", "SET_H"),
+        "QUAT": ("t", "SET_T"), "DEN": ("ANHSANG", "SET_AS"),
+        "MO": ("ANHSANG", "SET_AS"), "DONG": ("ANHSANG", "SET_AS"),
+    }
+    sensor, setting = pairs.get(device, (None, None))
+    if sensor and v[sensor] is not None and th[setting] is not None:
+        return _compare(sensor, v[sensor], th[setting])
+    return ""
 
 
 class AutoController:
@@ -78,18 +122,19 @@ class AutoController:
             sign = "<" if v < s else ">" if v > s else "="
             reasons[dev] = f"{lname(sensor)} {fmt(sensor, v)} {sign} ngưỡng {fmt(sensor, s)}"
 
-        # Màn che: mở khi độ mặn cao hoặc pH ngoài khoảng (giữ nguyên logic gốc của hệ thống)
-        sal, ph = value("GT_DOMAN"), value("GT_PH")
-        need_open = (
-            (sal is not None and th["SET_DOMAN"] is not None and sal > th["SET_DOMAN"])
-            or (ph is not None and th["SET_PHLOW"] is not None and ph < th["SET_PHLOW"])
-            or (ph is not None and th["SET_PHHIGH"] is not None and ph > th["SET_PHHIGH"])
-        )
-        if sal is not None or ph is not None:
-            desired["MO"], desired["DONG"] = (1, 0) if need_open else (0, 1)
-            reasons["MO"] = reasons["DONG"] = (
-                "độ mặn/pH ngoài ngưỡng" if need_open else "độ mặn và pH trong ngưỡng"
-            )
+        # Khóa an toàn giống firmware ESP32: mặn cao -> ngắt bơm; pH ngoài khoảng -> ngắt bơm + phun sương
+        interlock = _interlock_reason(data, th)
+        for dev in ("BOM", "SUONG"):
+            reason = interlock.get(dev)
+            if reason and desired.get(dev) == 1:
+                desired[dev], reasons[dev] = 0, reason
+
+        # Màn che theo ánh sáng (giống firmware): sáng <= ngưỡng -> MỞ, sáng hơn ngưỡng -> ĐÓNG
+        light = value("ANHSANG")
+        if light is not None and th["SET_AS"] is not None:
+            is_open = light <= th["SET_AS"]
+            desired["MO"], desired["DONG"] = (1, 0) if is_open else (0, 1)
+            reasons["MO"] = reasons["DONG"] = _light_reason(light, th["SET_AS"])
 
         # Giới hạn chạy liên tục cho thiết bị dùng nước
         for dev, limit_min in WATER_LIMITS.items():

@@ -67,7 +67,8 @@ LLM_BASE_URL = _str("LLM_BASE_URL").rstrip("/")
 LLM_TIMEOUT_SEC = _int("LLM_TIMEOUT_SEC", 60)
 
 # ---------- Tự động điều khiển ----------
-AUTO_CONTROL_ENABLED = _bool("AUTO_CONTROL_ENABLED", True)
+# Firmware ESP32 đã tự điều khiển ở chế độ AUTO -> server chỉ giám sát (bật lên sẽ ghi đè nhau)
+AUTO_CONTROL_ENABLED = _bool("AUTO_CONTROL_ENABLED", False)
 DRY_RUN = _bool("DRY_RUN", False)  # True: không ghi Firebase, không gửi Zalo (chỉ log)
 MIN_TOGGLE_SEC = _int("MIN_TOGGLE_SEC", 30)
 PUMP_MAX_ON_MIN = _float("PUMP_MAX_ON_MIN", 15)
@@ -81,6 +82,7 @@ HYST_LIGHT_RATIO = _float("HYST_LIGHT_RATIO", 0.1)
 # ---------- Cảnh báo ----------
 NOTIFY_DEVICE_CHANGES = _bool("NOTIFY_DEVICE_CHANGES", True)
 NOTIFY_MANUAL_CHANGES = _bool("NOTIFY_MANUAL_CHANGES", True)
+DEVICE_NOTIFY_MIN = _float("DEVICE_NOTIFY_MIN", 5)  # mỗi thiết bị báo Zalo tối đa 1 lần / N phút
 ALERT_REPEAT_MIN = _float("ALERT_REPEAT_MIN", 30)
 DAILY_REPORT_HOUR = _int("DAILY_REPORT_HOUR", 7)  # -1 để tắt
 HISTORY_RETENTION_DAYS = _int("HISTORY_RETENTION_DAYS", 30)

@@ -30,7 +30,20 @@ ESP32 ──► Firebase RTDB ◄──► Web (index.html)        ← xem & đi
 >
 > Muốn chạy thử an toàn (không ghi Firebase, không gửi Zalo): đặt `DRY_RUN=true`.
 
-Web vẫn dùng được khi **không** chạy máy chủ AI (mở thẳng `index.html`): xem số liệu, điều khiển, biểu đồ trực tiếp, AUTO cơ bản trong trình duyệt.
+Web vẫn dùng được khi **không** chạy máy chủ AI (mở thẳng `index.html`): xem số liệu, điều khiển, biểu đồ trực tiếp.
+
+## Firmware ESP32 (`aduno.ino`)
+ESP32 đọc cảm biến (DHT11, BH1750, độ ẩm đất, độ mặn TDS, pH), hiển thị LCD, phát âm thanh DFPlayer, ghi Google Sheet và đồng bộ Firebase qua REST:
+
+| Hướng | Nội dung | Chu kỳ |
+|---|---|---|
+| ESP → Firebase | `t h ANHSANG GT_AMDAT GT_DOMAN GT_PH` (+ trạng thái thiết bị khi AUTO) | 0.7 s |
+| Firebase → ESP | `SET_*`, `MODE`, lệnh thiết bị (dùng khi MANUAL) | 1 s |
+
+**Chế độ AUTO do ESP32 tự điều khiển**: đèn bật khi ánh sáng < `SET_AS`; màn che MỞ khi ánh sáng ≤ `SET_AS`, ĐÓNG khi sáng hơn; quạt bật khi nhiệt độ > `SET_T`; phun sương bật khi độ ẩm < `SET_H`; bơm bật khi độ ẩm đất < `SET_AMDAT`. Bơm bị ngắt khi độ mặn > `SET_DOMAN`; bơm và phun sương bị ngắt khi pH ngoài `SET_PHLOW`–`SET_PHHIGH`.
+**MANUAL**: web/Zalo ghi lệnh lên Firebase, ESP32 thực thi trong ~1 giây.
+
+Nạp firmware: sao chép `secrets.example.h` thành `secrets.h` (cùng thư mục với `aduno.ino`), điền WiFi, link Google Apps Script và Firebase secret (nếu đã khóa rules). `secrets.h` không được đưa lên Git.
 
 ## Chức năng
 
@@ -44,15 +57,14 @@ Web vẫn dùng được khi **không** chạy máy chủ AI (mở thẳng `inde
 
 ### Phân tích (server/analyzer.py)
 - **Luật chuyên gia**: vượt ngưỡng kéo dài > 2 phút (tránh báo nhầm do nhiễu), cảm biến lỗi/phi lý, nhiễu (giật số), báo 0 liên tục, đứng yên (ESP32 mất kết nối).
-- **Thiết bị không hiệu quả**: bơm chạy 8 phút mà đất không ẩm lên, quạt 15 phút không hạ nhiệt, phun sương không tăng ẩm, đèn bật không sáng hơn, màn che nhận cả MỞ & ĐÓNG.
+- **Thiết bị**: bơm chạy 8 phút mà đất không ẩm lên, quạt 15 phút không hạ nhiệt, phun sương không tăng ẩm, đèn bật không sáng hơn, màn che nhận cả MỞ & ĐÓNG, bật/tắt liên tục (≥ 6 lần/10 phút), bơm/phun sương chạy quá lâu.
 - **Model ML – IsolationForest**: học 24h dữ liệu (tự huấn luyện lại mỗi 30 phút), phát hiện tổ hợp chỉ số bất thường và chỉ ra cảm biến lệch nhiều nhất.
 - **Dự báo**: hồi quy tuyến tính 20 phút gần nhất → giá trị sau 30 phút và thời điểm có thể chạm mức nguy hiểm.
 
-### Tự động điều khiển (server/controller.py)
-Khi web để **AUTO**, máy chủ AI điều khiển thay trình duyệt (web tự nhường khi thấy máy chủ chạy):
-- Vùng trễ (hysteresis) → thiết bị không bật/tắt liên tục quanh ngưỡng.
-- Bơm/phun sương chạy quá `PUMP_MAX_ON_MIN`/`MIST_MAX_ON_MIN` phút → **ngắt bảo vệ** + nghỉ bắt buộc + báo Zalo.
-- Cảm biến lỗi → tắt thiết bị liên quan thay vì chạy theo số sai.
+### Máy chủ AI và chế độ AUTO
+Mặc định máy chủ AI **chỉ giám sát**: khi ESP32 tự bật/tắt thiết bị, máy chủ báo Zalo kèm lý do (vd “BẬT máy bơm — độ ẩm đất 32% < ngưỡng 40%”), tối đa 1 lần / `DEVICE_NOTIFY_MIN` phút mỗi thiết bị, và cảnh báo khi thiết bị bật/tắt liên tục hoặc bơm chạy quá lâu.
+
+Nếu dùng firmware **không** tự điều khiển, đặt `AUTO_CONTROL_ENABLED=true` để máy chủ điều khiển thay (cùng luật với firmware, thêm vùng trễ, ngắt bảo vệ bơm/phun sương sau `PUMP_MAX_ON_MIN`/`MIST_MAX_ON_MIN` phút, tắt thiết bị khi cảm biến lỗi). Không bật cùng lúc với firmware tự điều khiển — hai bên sẽ ghi đè nhau.
 
 ### Zalo
 Tự gửi: cảnh báo mới (kèm “Nhận định AI” nếu có LLM), nhắc lại sau `ALERT_REPEAT_MIN` phút nếu chưa xử lý, báo khi đã ổn định, mỗi lần tự bật/tắt thiết bị, khi có người điều khiển từ web, mất kết nối Firebase, báo cáo buổi sáng lúc `DAILY_REPORT_HOUR`.
@@ -71,7 +83,8 @@ Không có key → hệ thống dùng tin nhắn mẫu, mọi chức năng khác
 
 ## Cấu trúc
 ```
-index.html, style.css, app.js   Web (Firebase realtime, điều khiển, tự động dự phòng)
+aduno.ino                       Firmware ESP32
+index.html, style.css, app.js   Web (Firebase realtime, điều khiển)
 js/                             Module web: cảm biến, biểu đồ, kết nối máy chủ AI
 server/app.py                   Flask: phục vụ web + API
 server/engine.py                Vòng lặp chính: đọc → lưu → điều khiển → phân tích → cảnh báo
@@ -83,6 +96,5 @@ server/llm.py                   Kết nối LLM
 
 ## Lưu ý
 - **Bảo mật Firebase**: database mặc định cho ghi tự do — xem [docs/BAO_MAT_FIREBASE.md](docs/BAO_MAT_FIREBASE.md) để khóa lại.
-- Máy chủ AI ghi thêm nút nhỏ `AI_SERVER` (heartbeat, điểm sức khỏe) vào gốc Firebase.
 - `server/.env` chứa token — không commit (đã có `.gitignore`).
 - API của máy chủ AI không có đăng nhập: chỉ mở trong mạng nội bộ; muốn đưa ra Internet cần thêm xác thực.

@@ -7,7 +7,7 @@ const SEV_TEXT = { critical: "Nghiêm trọng", warning: "Cảnh báo", info: "G
 const SEV_ICON = { critical: "octagon-alert", warning: "triangle-alert", info: "info" };
 const CAT_TEXT = { threshold: "Ngưỡng", sensor: "Cảm biến", device: "Thiết bị", ml: "Model ML", forecast: "Dự báo", system: "Hệ thống" };
 const DEVICE_NAME = { BOM: "Máy bơm", DEN: "Đèn", QUAT: "Quạt", SUONG: "Phun sương", MO: "Màn che (mở)", DONG: "Màn che (đóng)", MODE: "Chế độ" };
-const SOURCE_TEXT = { auto: "AI tự động", zalo: "Zalo", external: "Web / thiết bị" };
+const SOURCE_TEXT = { auto: "Máy chủ AI", esp_auto: "ESP32 tự động", zalo: "Zalo", external: "Web" };
 
 export const backend = {
   url: null,

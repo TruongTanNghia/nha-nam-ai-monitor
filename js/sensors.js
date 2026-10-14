@@ -11,20 +11,20 @@ export const SENSORS = [
 export const SENSOR_BY_KEY = Object.fromEntries(SENSORS.map((s) => [s.key, s]));
 
 export const DEVICES = [
-  { key: "BOM", name: "Máy bơm", icon: "droplet", rule: "Bật khi độ ẩm đất < ngưỡng" },
+  { key: "BOM", name: "Máy bơm", icon: "droplet", rule: "Bật khi ẩm đất < ngưỡng (ngắt nếu mặn cao / pH lệch)" },
   { key: "DEN", name: "Đèn", icon: "lightbulb", rule: "Bật khi ánh sáng < ngưỡng" },
   { key: "QUAT", name: "Quạt", icon: "fan", rule: "Bật khi nhiệt độ > ngưỡng" },
-  { key: "SUONG", name: "Phun sương", icon: "cloud-drizzle", rule: "Bật khi độ ẩm KK < ngưỡng" },
+  { key: "SUONG", name: "Phun sương", icon: "cloud-drizzle", rule: "Bật khi độ ẩm KK < ngưỡng (ngắt nếu pH lệch)" },
 ];
 
 export const SETTINGS = [
   { key: "SET_T", name: "Nhiệt độ tối đa", unit: "°C", hint: "Quạt bật khi nhiệt độ vượt ngưỡng", step: 0.5 },
   { key: "SET_H", name: "Độ ẩm không khí tối thiểu", unit: "%", hint: "Phun sương bật khi thấp hơn", step: 1 },
-  { key: "SET_AS", name: "Ánh sáng tối thiểu", unit: "lux", hint: "Đèn bật khi thấp hơn", step: 50 },
+  { key: "SET_AS", name: "Ánh sáng tối thiểu", unit: "lux", hint: "Thấp hơn: bật đèn + mở màn che", step: 50 },
   { key: "SET_AMDAT", name: "Độ ẩm đất tối thiểu", unit: "%", hint: "Máy bơm bật khi thấp hơn", step: 1 },
-  { key: "SET_DOMAN", name: "Độ mặn tối đa", unit: "ppm", hint: "Mở màn che khi vượt", step: 10 },
-  { key: "SET_PHLOW", name: "pH thấp nhất", unit: "", hint: "Mở màn che khi pH thấp hơn", step: 0.1 },
-  { key: "SET_PHHIGH", name: "pH cao nhất", unit: "", hint: "Mở màn che khi pH cao hơn", step: 0.1 },
+  { key: "SET_DOMAN", name: "Độ mặn tối đa", unit: "ppm", hint: "Ngắt máy bơm khi vượt", step: 10 },
+  { key: "SET_PHLOW", name: "pH thấp nhất", unit: "", hint: "Ngắt bơm & phun sương khi pH thấp hơn", step: 0.1 },
+  { key: "SET_PHHIGH", name: "pH cao nhất", unit: "", hint: "Ngắt bơm & phun sương khi pH cao hơn", step: 0.1 },
 ];
 
 export const LEVEL_TEXT = { ok: "Ổn định", info: "Theo dõi", warning: "Cảnh báo", critical: "Nguy hiểm", fault: "Lỗi cảm biến" };

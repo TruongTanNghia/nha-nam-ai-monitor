@@ -37,7 +37,6 @@ const LIVE_MAX_POINTS = 360; // ~30 phút với chu kỳ 5 giây
 const state = {
   data: null,
   lastDataAt: null,
-  serverTimeOffset: 0,
   live: [],            // [{ts, t, h, ...}] dữ liệu trực tiếp trong trình duyệt
   range: "live",
   busy: false,
@@ -88,15 +87,6 @@ $("#themeBtn").addEventListener("click", () => {
 });
 
 /* =========================
-   MÁY CHỦ AI CÓ ĐANG ĐIỀU KHIỂN?
-========================= */
-function serverControlling(data = state.data) {
-  const ai = data?.AI_SERVER;
-  if (!ai?.heartbeat || !ai.auto_control) return false;
-  return Date.now() + state.serverTimeOffset - ai.heartbeat < 45000;
-}
-
-/* =========================
    MODE AUTO / MANUAL
 ========================= */
 function renderMode(data) {
@@ -104,13 +94,9 @@ function renderMode(data) {
   $("#btnAuto").classList.toggle("active", auto);
   $("#btnManual").classList.toggle("active", !auto);
   const note = $("#modeNote");
-  if (auto) {
-    note.innerHTML = serverControlling(data)
-      ? `${icon("bot")} Máy chủ AI đang tự điều khiển 24/7`
-      : `${icon("monitor")} Trình duyệt đang tự điều khiển (giữ tab mở)`;
-  } else {
-    note.innerHTML = `${icon("hand")} Điều khiển thủ công`;
-  }
+  note.innerHTML = auto
+    ? `${icon("cpu")} ESP32 tự điều khiển theo ngưỡng`
+    : `${icon("hand")} Điều khiển thủ công từ web / Zalo`;
   refreshIcons(note);
 }
 
@@ -269,7 +255,7 @@ function renderDeviceControls(data) {
       <span class="device-icon">${icon("blinds")}</span>
       <div class="device-text">
         <div class="device-name">Màn che</div>
-        <small>${auto ? "Mở khi độ mặn/pH ngoài ngưỡng" : mo ? "Đang mở" : dong ? "Đang đóng" : "Chưa chọn"}</small>
+        <small>${auto ? "Mở khi ánh sáng ≤ ngưỡng, đóng khi sáng hơn" : mo ? "Đang mở" : dong ? "Đang đóng" : "Chưa chọn"}</small>
       </div>
       <div class="segmented">
         <button class="${mo ? "active" : ""}" data-door="MO" ${disabled}>Mở</button>
@@ -353,31 +339,6 @@ $("#saveSettingsBtn").addEventListener("click", async () => {
 });
 
 /* =========================
-   AUTO TRÊN TRÌNH DUYỆT (dự phòng khi máy chủ AI không chạy)
-========================= */
-let lastBrowserAuto = 0;
-async function applyBrowserAutoControl(data) {
-  if (Number(data?.MODE) !== MODE_AUTO || serverControlling(data)) return;
-  if (Date.now() - lastBrowserAuto < 5000) return;
-  lastBrowserAuto = Date.now();
-
-  const v = (k) => Number(data[k]) || 0;
-  const updates = {
-    BOM: v("GT_AMDAT") < v("SET_AMDAT") ? 1 : 0,
-    DEN: v("ANHSANG") < v("SET_AS") ? 1 : 0,
-    SUONG: v("h") < v("SET_H") ? 1 : 0,
-    QUAT: v("t") > v("SET_T") ? 1 : 0,
-  };
-  const needOpen = v("GT_DOMAN") > v("SET_DOMAN") || v("GT_PH") < v("SET_PHLOW") || v("GT_PH") > v("SET_PHHIGH");
-  Object.assign(updates, needOpen ? { MO: 1, DONG: 0 } : { MO: 0, DONG: 1 });
-
-  const changed = Object.keys(updates).some((k) => (Number(data[k]) || 0) !== updates[k]);
-  if (changed) {
-    try { await update(ref(db, "/"), updates); } catch (e) { console.error("Lỗi AUTO:", e); }
-  }
-}
-
-/* =========================
    BIỂU ĐỒ
 ========================= */
 const rangeText = { live: "Dữ liệu trực tiếp từ lúc mở trang", "1h": "1 giờ qua", "6h": "6 giờ qua", "24h": "24 giờ qua", "7d": "7 ngày qua" };
@@ -450,7 +411,6 @@ function renderAll() {
   $("#lastUpdate").textContent = `Cập nhật lúc ${fmtClock(state.lastDataAt)} · ${new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit" })}`;
 }
 
-onValue(ref(db, ".info/serverTimeOffset"), (snap) => { state.serverTimeOffset = snap.val() || 0; });
 onValue(ref(db, ".info/connected"), (snap) => {
   $("#connFirebase").classList.toggle("on", snap.val() === true);
 });
@@ -461,7 +421,6 @@ onValue(ref(db, "/"), (snapshot) => {
   state.lastDataAt = Date.now();
   pushLive(state.data);
   renderAll();
-  applyBrowserAutoControl(state.data);
   if (state.range === "live") renderChartTab();
 }, (error) => {
   console.error("Lỗi đọc Firebase:", error);

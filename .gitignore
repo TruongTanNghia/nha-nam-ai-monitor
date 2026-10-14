@@ -1,6 +1,7 @@
 # Bí mật & dữ liệu cục bộ
 server/.env
 server/data/
+secrets.h
 
 # Dự án cũ có token thật — không đưa lên repo
 Nhom5_Intrusion_Warning/

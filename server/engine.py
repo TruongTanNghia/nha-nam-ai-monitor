@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import config
 import llm
 from analyzer import SEV_RANK, Analyzer
-from controller import AutoController
+from controller import AutoController, explain_auto
 from firebase_client import Firebase
 from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, SENSOR_KEYS, SENSORS, fmt, num, thresholds
 from storage import Storage
@@ -52,7 +52,7 @@ class Engine:
         self.fail_count = 0
         self.offline_alerted = False
         self.last_ok_ts = None
-        self.last_heartbeat = 0
+        self.device_notified = {}  # thiết bị -> lần báo Zalo gần nhất
         self.last_prune = 0
         self.last_daily = None
         self.mute_until = 0
@@ -123,7 +123,7 @@ class Engine:
             for ch in self._merge_door(changes):
                 lines.append(f"• {device_text(ch['device'], ch['value'])} — {ch['reason']}")
             if lines and config.NOTIFY_DEVICE_CHANGES:
-                self.notify("🤖 Tự động điều khiển:\n" + "\n".join(lines), important=False)
+                self.notify("🤖 Máy chủ AI tự động điều khiển:\n" + "\n".join(lines), important=False)
 
         # Phân tích + cảnh báo
         with self.lock:
@@ -133,7 +133,6 @@ class Engine:
             self.analysis = analysis
         self._process_findings(analysis["findings"], safety_events, now)
 
-        self._heartbeat(analysis, now)
         self._housekeeping(now)
 
     @staticmethod
@@ -151,15 +150,23 @@ class Engine:
         return out
 
     def _detect_external_changes(self, values, now):
-        """Phát hiện thay đổi thiết bị/chế độ không do server ghi (web, nút bấm, ESP)."""
+        """Thiết bị/chế độ đổi mà không do server ghi.
+
+        AUTO: firmware ESP32 tự bật/tắt theo ngưỡng -> báo kèm lý do.
+        MANUAL: có người điều khiển từ web.
+        """
         prev = self.prev_values
         if prev is None:
             return
-        lines = []
+        parts = []
         if values["MODE"] != prev["MODE"]:
             mode = "AUTO 🤖" if values["MODE"] == MODE_AUTO else "MANUAL ✋"
-            lines.append(f"• Chế độ chuyển sang {mode}")
             self.store.add_device_event(now, "MODE", values["MODE"], "external", "")
+            if config.NOTIFY_MANUAL_CHANGES:
+                parts.append(f"⚙️ Chế độ chuyển sang {mode}")
+
+        auto = values["MODE"] == MODE_AUTO
+        source = "esp_auto" if auto else "external"
         changed = []
         for dev in DEVICE_KEYS:
             if values[dev] == prev[dev]:
@@ -168,12 +175,23 @@ class Engine:
             if ours and ours[0] == values[dev] and now - ours[1] < 60:
                 self.our_writes.pop(dev, None)
                 continue  # do server/Zalo vừa ghi, đã ghi nhận
-            self.store.add_device_event(now, dev, values[dev], "external", "")
-            changed.append({"device": dev, "value": values[dev]})
+            reason = explain_auto(dev, values[dev], self.latest_data) if auto else ""
+            self.store.add_device_event(now, dev, values[dev], source, reason)
+            changed.append({"device": dev, "value": values[dev], "reason": reason})
+
+        # ESP32 không có vùng trễ -> thiết bị có thể đảo liên tục: mỗi thiết bị chỉ báo 1 lần / N phút
+        lines = []
         for ch in self._merge_door(changed):
-            lines.append(f"• {device_text(ch['device'], ch['value'])}")
-        if lines and config.NOTIFY_MANUAL_CHANGES:
-            self.notify("👤 Có thay đổi từ web/thiết bị:\n" + "\n".join(lines), important=False)
+            key = "MO" if ch["device"] in ("MO", "DONG") else ch["device"]
+            if now - self.device_notified.get(key, 0) < config.DEVICE_NOTIFY_MIN * 60:
+                continue
+            self.device_notified[key] = now
+            lines.append(f"• {device_text(ch['device'], ch['value'])}" + (f" — {ch['reason']}" if ch["reason"] else ""))
+        if lines and (config.NOTIFY_DEVICE_CHANGES if auto else config.NOTIFY_MANUAL_CHANGES):
+            title = "🤖 ESP32 tự động điều khiển:" if auto else "👤 Điều khiển thủ công từ web:"
+            parts.append(title + "\n" + "\n".join(lines))
+        if parts:
+            self.notify("\n".join(parts), important=False)
 
     # ----------------------------------------------------------------- alerts
     def _process_findings(self, findings, events, now):
@@ -352,19 +370,6 @@ class Engine:
         issues = ctx.get("van_de_hien_tai") or []
         lines.append("Hiện tại: " + ("; ".join(i["tieu_de"] for i in issues[:3]) if issues else "ổn định ✅"))
         return "\n".join(lines)
-
-    def _heartbeat(self, analysis, now):
-        """Báo cho web biết server AI đang chạy (web sẽ nhường quyền AUTO cho server)."""
-        if now - self.last_heartbeat < 15:
-            return
-        self.last_heartbeat = now
-        self.fb.update({
-            "heartbeat": {".sv": "timestamp"},
-            "auto_control": config.AUTO_CONTROL_ENABLED,
-            "health": analysis["health"]["score"],
-            "label": analysis["health"]["label"],
-            "summary": analysis["summary"][:300],
-        }, path="AI_SERVER")
 
     def _housekeeping(self, now):
         since_train = now - self.analyzer.last_train
