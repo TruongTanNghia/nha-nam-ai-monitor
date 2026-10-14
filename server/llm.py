@@ -111,6 +111,9 @@ def _call_openai(system, user, max_tokens):
             except requests.RequestException as exc:
                 log.warning("LLM %s lỗi kết nối: %s", m, exc)
                 break
+            if res.status_code == 503:  # model quá tải: chuyển ngay sang model dự phòng
+                log.warning("LLM %s quá tải, chuyển model dự phòng", m)
+                break
             if res.status_code in RETRYABLE:
                 log.warning("LLM %s bận (HTTP %s), lần thử %d", m, res.status_code, attempt + 1)
                 time.sleep(2)
