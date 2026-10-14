@@ -19,7 +19,11 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 // WiFi, link Google Sheet, Firebase secret nam trong secrets.h (khong dua len GitHub).
 // Lan dau: sao chep secrets.example.h thanh secrets.h roi dien thong tin.
+#if __has_include("secrets.h")
 #include "secrets.h"
+#else
+#error "Thieu file secrets.h: sao chep secrets.example.h thanh secrets.h (cung thu muc voi file .ino) roi dien WiFi"
+#endif
 
 // ================= WIFI =================
 const char* ssid = WIFI_SSID;
