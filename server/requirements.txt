@@ -1,0 +1,6 @@
+flask>=3.0
+requests>=2.31
+numpy>=1.26
+scikit-learn>=1.4
+python-dotenv>=1.0
+anthropic>=1.0   # chỉ cần khi dùng Claude

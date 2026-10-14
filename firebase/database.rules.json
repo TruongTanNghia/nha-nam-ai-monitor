@@ -1,0 +1,6 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": "auth != null && auth.uid === 'THAY_BANG_UID_TAI_KHOAN_QUAN_TRI'"
+  }
+}

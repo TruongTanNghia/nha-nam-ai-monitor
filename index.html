@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Nhà Nấm · Trạm giám sát AI</title>
+  <link rel="icon" href="logo.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500;1,9..144,700&family=JetBrains+Mono:wght@500;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="style.css" />
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+</head>
+
+<body>
+  <div class="app">
+    <!-- ================= SIDEBAR ================= -->
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="logo.png" alt="" class="brand-logo" />
+        <div>
+          <div class="brand-name">Nhà Nấm</div>
+          <div class="brand-sub">Trạm giám sát AI</div>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Điều hướng">
+        <button class="tab-btn active" data-tab="tongquan">
+          <i data-lucide="layout-dashboard"></i><span>Tổng quan</span>
+        </button>
+        <button class="tab-btn" data-tab="dieukhien">
+          <i data-lucide="sliders-horizontal"></i><span>Điều khiển</span>
+        </button>
+        <button class="tab-btn" data-tab="bieudo">
+          <i data-lucide="chart-spline"></i><span>Biểu đồ</span>
+        </button>
+        <button class="tab-btn" data-tab="phantich">
+          <i data-lucide="brain-circuit"></i><span>Phân tích AI</span>
+        </button>
+        <button class="tab-btn" data-tab="canhbao">
+          <i data-lucide="bell-ring"></i><span>Cảnh báo</span>
+          <b class="nav-badge" id="navAlertBadge" hidden>0</b>
+        </button>
+      </nav>
+
+      <div class="side-foot">
+        <div class="conn" id="connFirebase"><span class="dot"></span><span>Firebase</span></div>
+        <div class="conn" id="connServer"><span class="dot"></span><span>Máy chủ AI</span></div>
+        <button class="theme-btn" id="themeBtn" type="button" aria-label="Đổi giao diện sáng/tối">
+          <i data-lucide="moon-star"></i><span>Giao diện tối</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ================= MAIN ================= -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="pageTitle">Tổng quan hệ thống</h1>
+          <p class="subtitle" id="lastUpdate">Đang kết nối cảm biến…</p>
+        </div>
+
+        <div class="mode-wrap">
+          <div class="mode-switch" role="group" aria-label="Chế độ vận hành">
+            <button id="btnManual" class="mode-btn" type="button">
+              <i data-lucide="hand"></i> MANUAL
+            </button>
+            <button id="btnAuto" class="mode-btn" type="button">
+              <i data-lucide="cpu"></i> AUTO
+            </button>
+          </div>
+          <div class="mode-note" id="modeNote"></div>
+        </div>
+      </header>
+
+      <!-- ========== TAB: TỔNG QUAN ========== -->
+      <section id="tongquan" class="tab-content active">
+        <div class="hero card reveal">
+          <div class="health">
+            <svg viewBox="0 0 120 120" class="health-ring" aria-hidden="true">
+              <circle cx="60" cy="60" r="52" class="ring-track" />
+              <circle cx="60" cy="60" r="52" class="ring-value" id="healthArc" />
+            </svg>
+            <div class="health-center">
+              <b id="healthScore">--</b>
+              <span id="healthLabel">Sức khỏe</span>
+            </div>
+          </div>
+          <div class="hero-body">
+            <div class="eyebrow"><i data-lucide="sparkles"></i> Nhận định của AI</div>
+            <p class="hero-summary" id="heroSummary">Đang chờ dữ liệu phân tích…</p>
+            <div class="chips" id="statusChips"></div>
+          </div>
+          <div class="device-strip" id="deviceStrip"></div>
+        </div>
+
+        <div class="sensor-grid" id="sensorGrid"></div>
+
+        <div class="split">
+          <div class="card reveal">
+            <div class="card-head">
+              <h3><i data-lucide="triangle-alert"></i> Vấn đề cần chú ý</h3>
+              <button class="link-btn" data-goto="phantich">Xem phân tích <i data-lucide="arrow-right"></i></button>
+            </div>
+            <div class="finding-list" id="overviewFindings"></div>
+          </div>
+          <div class="card reveal">
+            <div class="card-head">
+              <h3><i data-lucide="history"></i> Hoạt động thiết bị</h3>
+            </div>
+            <div class="event-list" id="eventList"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== TAB: ĐIỀU KHIỂN ========== -->
+      <section id="dieukhien" class="tab-content">
+        <div class="control-layout">
+          <div class="card">
+            <div class="card-head">
+              <h3><i data-lucide="power"></i> Thiết bị</h3>
+              <span class="hint" id="controlHint"></span>
+            </div>
+            <div class="device-list" id="deviceControls"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3><i data-lucide="gauge"></i> Ngưỡng điều khiển tự động</h3>
+            </div>
+            <form class="setting-list" id="settingControls" autocomplete="off"></form>
+            <div class="form-actions">
+              <span class="save-status" id="saveStatus" role="status"></span>
+              <button id="saveSettingsBtn" class="btn primary" type="button">
+                <i data-lucide="save"></i> Lưu cài đặt
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== TAB: BIỂU ĐỒ ========== -->
+      <section id="bieudo" class="tab-content">
+        <div class="filter-row" role="group" aria-label="Khoảng thời gian">
+          <button class="pill active" data-range="live">Trực tiếp</button>
+          <button class="pill" data-range="1h">1 giờ</button>
+          <button class="pill" data-range="6h">6 giờ</button>
+          <button class="pill" data-range="24h">24 giờ</button>
+          <button class="pill" data-range="7d">7 ngày</button>
+          <span class="filter-note" id="rangeNote"></span>
+        </div>
+        <div class="chart-grid" id="chartGrid"></div>
+      </section>
+
+      <!-- ========== TAB: PHÂN TÍCH AI ========== -->
+      <section id="phantich" class="tab-content">
+        <div class="server-banner" id="serverBanner" hidden></div>
+
+        <div class="ai-grid">
+          <div class="card span-2">
+            <div class="card-head">
+              <h3><i data-lucide="scan-search"></i> Kết quả phân tích</h3>
+              <span class="hint">Luật chuyên gia + model ML + dự báo xu hướng</span>
+            </div>
+            <div class="finding-list" id="aiFindings"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3><i data-lucide="trending-up"></i> Dự báo 30 phút tới</h3>
+            </div>
+            <div class="forecast" id="forecastTable"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3><i data-lucide="cpu"></i> Model phát hiện bất thường</h3>
+            </div>
+            <div id="mlCard" class="ml-card"></div>
+          </div>
+
+          <div class="card span-2">
+            <div class="card-head">
+              <h3><i data-lucide="file-text"></i> Báo cáo AI</h3>
+              <div class="btn-row">
+                <select id="reportHours" class="select" aria-label="Khoảng báo cáo">
+                  <option value="1">1 giờ</option>
+                  <option value="6">6 giờ</option>
+                  <option value="24" selected>24 giờ</option>
+                </select>
+                <button class="btn" id="btnReport" type="button"><i data-lucide="wand-sparkles"></i> Tạo báo cáo</button>
+                <button class="btn primary" id="btnReportZalo" type="button"><i data-lucide="send"></i> Gửi Zalo</button>
+              </div>
+            </div>
+            <div class="report-box" id="reportBox">Bấm “Tạo báo cáo” để AI tổng hợp tình hình nhà nấm.</div>
+          </div>
+
+          <div class="card span-2">
+            <div class="card-head">
+              <h3><i data-lucide="messages-square"></i> Hỏi trợ lý AI</h3>
+              <span class="hint" id="llmHint"></span>
+            </div>
+            <div class="chat" id="chatLog">
+              <div class="msg bot">Chào anh! Hỏi em bất cứ điều gì về nhà nấm, ví dụ: “Vì sao nhiệt độ cao?” hoặc “Hôm nay có cần tưới thêm không?”</div>
+            </div>
+            <form class="chat-form" id="chatForm">
+              <input id="chatInput" type="text" placeholder="Nhập câu hỏi…" maxlength="500" />
+              <button class="btn primary" type="submit"><i data-lucide="arrow-up"></i></button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== TAB: CẢNH BÁO & ZALO ========== -->
+      <section id="canhbao" class="tab-content">
+        <div class="alert-layout">
+          <div class="card">
+            <div class="card-head">
+              <h3><i data-lucide="bell-ring"></i> Lịch sử cảnh báo</h3>
+              <div class="btn-row" role="group" aria-label="Lọc mức độ">
+                <button class="pill sm active" data-sev="all">Tất cả</button>
+                <button class="pill sm" data-sev="critical">Nghiêm trọng</button>
+                <button class="pill sm" data-sev="warning">Cảnh báo</button>
+                <button class="pill sm" data-sev="info">Ghi chú</button>
+              </div>
+            </div>
+            <div class="alert-table" id="alertTable"></div>
+          </div>
+
+          <div class="stack">
+            <div class="card zalo-card">
+              <div class="card-head">
+                <h3><i data-lucide="message-circle"></i> Zalo Bot</h3>
+                <span class="tag" id="zaloTag">—</span>
+              </div>
+              <div id="zaloInfo" class="kv"></div>
+              <div class="btn-row wrap">
+                <button class="btn primary" id="btnZaloTest" type="button"><i data-lucide="send"></i> Gửi tin thử</button>
+                <select id="muteSelect" class="select" aria-label="Tạm tắt thông báo">
+                  <option value="0">Thông báo: bật</option>
+                  <option value="30">Tắt 30 phút</option>
+                  <option value="60">Tắt 1 giờ</option>
+                  <option value="240">Tắt 4 giờ</option>
+                </select>
+              </div>
+              <p class="note" id="zaloResult"></p>
+              <div id="zaloChats"></div>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><h3><i data-lucide="terminal"></i> Lệnh Zalo</h3></div>
+              <ul class="cmd-list">
+                <li><code>/trangthai</code> Số liệu hiện tại</li>
+                <li><code>/phantich</code> Kết quả phân tích AI</li>
+                <li><code>/baocao</code> Báo cáo 24 giờ</li>
+                <li><code>/auto</code> <code>/manual</code> Đổi chế độ</li>
+                <li><code>/bat quat</code> <code>/tat bom</code> Bật/tắt thiết bị</li>
+                <li><code>/mo man</code> <code>/dong man</code> Màn che</li>
+                <li><code>/tat het</code> Tắt tất cả</li>
+                <li><code>/im 60</code> Tạm tắt thông báo</li>
+                <li><code>chatid</code> Xem Chat ID</li>
+                <li>Câu hỏi bất kỳ → AI trả lời</li>
+              </ul>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><h3><i data-lucide="server"></i> Máy chủ AI</h3></div>
+              <label class="field">
+                <span>Địa chỉ máy chủ</span>
+                <div class="inline">
+                  <input id="backendInput" type="text" placeholder="http://localhost:5000" />
+                  <button class="btn" id="btnBackendSave" type="button">Lưu</button>
+                </div>
+              </label>
+              <p class="note">Chạy <code>python server/app.py</code> trên máy tính để bật phân tích AI, tự động điều khiển 24/7 và cảnh báo Zalo.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
