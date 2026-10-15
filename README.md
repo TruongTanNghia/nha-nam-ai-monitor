@@ -56,11 +56,19 @@ Nạp firmware: sao chép `secrets.example.h` thành `secrets.h` (cùng thư m�
 
 | Phần | Nội dung |
 |---|---|
-| **Tổng quan** | Trạng thái kết nối ESP32 (đã kết nối / chậm / mất kết nối + từ bao giờ), điểm sức khỏe 0–100, nhận định AI, 6 thẻ cảm biến (đồng hồ + ngưỡng + xu hướng), trạng thái thiết bị, vấn đề & lịch sử bật/tắt |
+| **Tổng quan** | Trạng thái kết nối ESP32 (đã kết nối / chậm / mất kết nối + từ bao giờ), **2 chỉ số riêng: Môi trường nhà nấm và Nước cấp**, nhận định AI, 6 thẻ cảm biến (đồng hồ + ngưỡng + xu hướng), trạng thái thiết bị, vấn đề & lịch sử bật/tắt |
 | **Điều khiển** | Công tắc thiết bị, màn che, cài ngưỡng (có đơn vị & giải thích) |
 | **Biểu đồ** | Trực tiếp / 1h / 6h / 24h / 7 ngày, đường ngưỡng, thấp–TB–cao |
 | **Phân tích AI** | Danh sách vấn đề, dự báo 30 phút, trạng thái model ML, báo cáo AI, chat hỏi đáp |
 | **Cảnh báo** | Lịch sử cảnh báo (lọc mức độ), trạng thái Zalo, gửi tin thử, tạm tắt thông báo |
+
+### Hai chỉ số (server/indices.py)
+| Chỉ số | Dữ liệu đầu vào | Ý nghĩa | Hành động |
+|---|---|---|---|
+| 🌿 **Môi trường nhà nấm** (0–100: Tốt/Khá/Cần chú ý/Nguy hiểm) | Nhiệt độ, độ ẩm không khí, ánh sáng, độ ẩm giá thể | Vi khí hậu có phù hợp với nấm không | Phun sương, quạt, màn che, đèn |
+| 💧 **Chất lượng nước cấp** (Đạt/Cần theo dõi/Không đạt) | pH, độ mặn/TDS | Nước có an toàn để tưới, phun sương không | Khóa bơm; kiểm tra nguồn nước, lọc hoặc thay nước |
+
+pH và độ mặn **không trung bình hóa** với nhiệt độ hay ánh sáng: môi trường tốt mà nước không đạt thì kết luận chung là “Nước không đạt”, kèm cảnh báo riêng *“Nước cấp không đạt — … đang bị khóa”* theo đúng firmware (pH ngoài khoảng → khóa bơm và phun sương; mặn vượt ngưỡng → khóa bơm).
 
 ### Phân tích (server/analyzer.py)
 - **Luật chuyên gia**: vượt ngưỡng kéo dài > 2 phút (tránh báo nhầm do nhiễu), cảm biến lỗi/phi lý, nhiễu (giật số), báo 0 liên tục, đứng yên (ESP32 mất kết nối).

@@ -7,6 +7,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 import config
+import indices
 import llm
 from analyzer import SEV_RANK, Analyzer
 from controller import AutoController, explain_auto
@@ -324,7 +325,10 @@ class Engine:
             },
             "nguong_cai_dat": {k: v for k, v in th.items() if v is not None},
             "thiet_bi": {DEVICES[k]: ("BẬT" if num(data.get(k)) == 1 else "TẮT") for k in DEVICE_KEYS},
-            "diem_suc_khoe": analysis.get("health"),
+            "chi_so_tong": analysis.get("health"),
+            # Hai chỉ số tách riêng, không trung bình hóa: môi trường (t, h, ánh sáng, ẩm giá thể) và nước cấp (pH, mặn)
+            "chi_so_moi_truong": (analysis.get("indices") or {}).get("environment"),
+            "chi_so_nuoc_cap": (analysis.get("indices") or {}).get("water"),
             "van_de_hien_tai": [
                 {"muc": f["severity"], "tieu_de": f["title"], "chi_tiet": f["detail"]}
                 for f in analysis.get("findings", [])
@@ -371,8 +375,9 @@ class Engine:
         return self._template_report(ctx, hours, alerts), False
 
     def _template_report(self, ctx, hours, alerts):
-        health = ctx.get("diem_suc_khoe") or {}
-        lines = [f"📋 BÁO CÁO NHÀ NẤM {hours}H QUA", f"💚 Sức khỏe: {health.get('score', '—')}/100 ({health.get('label', '—')})"]
+        with self.lock:
+            idx = (self.analysis or {}).get("indices")
+        lines = [f"📋 BÁO CÁO NHÀ NẤM {hours}H QUA", *indices.summary_lines(idx)]
         st = ctx.get(f"thong_ke_{hours}h", {})
         for name, s in st.items():
             if isinstance(s, dict) and "min" in s:
@@ -431,14 +436,14 @@ class Engine:
                 analysis, data = self.analysis, self.latest_data or {}
             if not analysis:
                 return
-            health = analysis["health"]
             devices = " | ".join(
                 f"{name} {'🟢' if num(data.get(key)) == 1 else '⚪'}"
                 for key, name in (("BOM", "Bơm"), ("DEN", "Đèn"), ("QUAT", "Quạt"), ("SUONG", "Sương"))
             )
             door = "Mở" if num(data.get("MO")) == 1 else "Đóng" if num(data.get("DONG")) == 1 else "—"
             lines = [
-                f"🍄 NHÀ NẤM — {health['score']}/100 ({health['label']})",
+                "🍄 NHÀ NẤM",
+                *indices.summary_lines(analysis.get("indices")),
                 self.readings_line(),
                 f"🔧 {devices} | Màn che: {door}",
             ]

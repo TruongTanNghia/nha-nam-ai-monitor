@@ -7,8 +7,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 import {
-  DEVICES, LEVEL_ICON, LEVEL_TEXT, SENSORS, SETTINGS, SEV_RANK,
-  fmtValue, num, sensorStatus, thresholdText, thresholds,
+  DEVICES, LEVEL_ICON, LEVEL_TEXT, SENSORS, SETTINGS, WATER_KEYS,
+  fmtValue, localIndices, num, sensorStatus, thresholdText, thresholds,
 } from "./js/sensors.js";
 import { $, $$, esc, fmtClock, icon, refreshIcons, setHTML, timeAgo, toast } from "./js/ui.js";
 import { buildChartCards, gaugeSVG, renderCharts, resetCharts, sparkline, updateGauge } from "./js/charts.js";
@@ -119,8 +119,8 @@ $("#btnAuto").addEventListener("click", () => setMode(MODE_AUTO));
 /* =========================
    THẺ CẢM BIẾN (TỔNG QUAN)
 ========================= */
-function buildSensorTiles() {
-  $("#sensorGrid").innerHTML = SENSORS.map((s, i) => `
+function tileHTML(s, i) {
+  return `
     <article class="sensor card reveal" id="tile-${s.key}" style="--c:var(${s.color}); --d:${i * 60}ms">
       <header>
         <span class="sensor-icon">${icon(s.icon)}</span>
@@ -135,8 +135,14 @@ function buildSensorTiles() {
         <span class="threshold">—</span>
         <span class="spark-wrap"></span>
       </footer>
-    </article>`).join("");
-  refreshIcons($("#sensorGrid"));
+    </article>`;
+}
+
+function buildSensorTiles() {
+  // Hai nhóm tách riêng: môi trường nhà nấm và chất lượng nước cấp
+  $("#sensorGridEnv").innerHTML = SENSORS.filter((s) => !WATER_KEYS.includes(s.key)).map(tileHTML).join("");
+  $("#sensorGridWater").innerHTML = SENSORS.filter((s) => WATER_KEYS.includes(s.key)).map(tileHTML).join("");
+  refreshIcons($("#tongquan"));
 }
 
 function gaugeRange(s, value, th) {
@@ -184,36 +190,41 @@ function renderSensorTiles(data) {
 /* =========================
    HERO: ĐIỂM SỨC KHỎE + CHIPS
 ========================= */
-function localHealth(data) {
-  const th = thresholds(data);
-  let score = 100;
-  const issues = [];
-  for (const s of SENSORS) {
-    const st = sensorStatus(s.key, num(data?.[s.key]), th);
-    if (SEV_RANK[st.level] >= 2) {
-      score -= st.level === "warning" ? 12 : 25;
-      issues.push(`${s.name}: ${st.text.toLowerCase()}`);
-    }
-  }
-  score = Math.max(0, score);
-  const label = score >= 85 ? "Tốt" : score >= 65 ? "Khá" : score >= 40 ? "Cần chú ý" : "Nguy hiểm";
-  const summary = issues.length
-    ? `${issues.length} chỉ số cần chú ý: ${issues.slice(0, 3).join("; ")}.`
-    : "Các chỉ số đang trong ngưỡng an toàn.";
-  return { score, label, summary };
+const LEVEL_BY_LABEL = { "Đạt": "ok", "Cần theo dõi": "warning", "Không đạt": "critical" };
+
+function drawIndex(sel, score, label, level) {
+  const el = $(sel);
+  const C = 2 * Math.PI * 52;
+  el.querySelector(".ring-value").style.strokeDasharray = `${(score / 100) * C} ${C}`;
+  el.dataset.level = level;
+  el.querySelector("b").textContent = score;
+  el.querySelector(".health-center span").textContent = label;
 }
+
+const scoreLevel = (score) => (score >= 85 ? "ok" : score >= 65 ? "info" : score >= 40 ? "warning" : "critical");
 
 function renderHero(data) {
   const a = backend.online ? backend.snapshot?.analysis : null;
-  const h = a ? { ...a.health, summary: a.summary } : localHealth(data);
-  const arc = $("#healthArc");
-  const C = 2 * Math.PI * 52;
-  arc.style.strokeDasharray = `${(h.score / 100) * C} ${C}`;
-  const level = h.score >= 85 ? "ok" : h.score >= 65 ? "info" : h.score >= 40 ? "warning" : "critical";
-  $(".health").dataset.level = level;
-  $("#healthScore").textContent = h.score;
-  $("#healthLabel").textContent = h.label;
-  $("#heroSummary").textContent = h.summary + (a ? "" : " (đánh giá cơ bản trên trình duyệt)");
+  const idx = a?.indices ?? localIndices(data);
+  const env = idx.environment, water = idx.water;
+  drawIndex("#idxEnv", env.score, env.label, scoreLevel(env.score));
+  drawIndex("#idxWater", water.score, water.label, LEVEL_BY_LABEL[water.label] || "info");
+  $("#envBadge").textContent = `${env.score}/100 · ${env.label}`;
+  $("#envBadge").dataset.level = scoreLevel(env.score);
+  $("#waterBadge").textContent = water.label;
+  $("#waterBadge").dataset.level = LEVEL_BY_LABEL[water.label] || "info";
+
+  // Nước không đạt: cảnh báo riêng, không bị "trung bình hóa" với môi trường
+  const banner = $("#waterBanner");
+  banner.hidden = !water.lock_text;
+  if (water.lock_text) setHTML(banner, `${icon("octagon-alert")}<div><b>${esc(water.lock_text)}</b></div>`);
+
+  let summary = a?.summary;
+  if (!summary) {
+    const envIssues = env.issues.length ? `Môi trường: ${env.issues.slice(0, 2).join("; ")}.` : "Môi trường trong ngưỡng an toàn.";
+    summary = (water.lock_text ? water.lock_text + " " : water.issues.length ? `Nước cấp: ${water.issues.join("; ")}. ` : "") + envIssues;
+  }
+  $("#heroSummary").textContent = summary + (a ? "" : " (đánh giá cơ bản trên trình duyệt)");
 
   const llm = backend.health?.llm;
   const zalo = backend.health?.zalo;

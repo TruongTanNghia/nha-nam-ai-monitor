@@ -81,18 +81,27 @@
       </header>
 
       <div class="hw-banner" id="hwBanner" role="alert" hidden></div>
+      <div class="hw-banner water-banner" id="waterBanner" role="alert" hidden></div>
 
       <!-- ========== TAB: TỔNG QUAN ========== -->
       <section id="tongquan" class="tab-content active">
         <div class="hero card reveal">
-          <div class="health">
-            <svg viewBox="0 0 120 120" class="health-ring" aria-hidden="true">
-              <circle cx="60" cy="60" r="52" class="ring-track" />
-              <circle cx="60" cy="60" r="52" class="ring-value" id="healthArc" />
-            </svg>
-            <div class="health-center">
-              <b id="healthScore">--</b>
-              <span id="healthLabel">Sức khỏe</span>
+          <div class="indices">
+            <div class="health" id="idxEnv">
+              <svg viewBox="0 0 120 120" class="health-ring" aria-hidden="true">
+                <circle cx="60" cy="60" r="52" class="ring-track" />
+                <circle cx="60" cy="60" r="52" class="ring-value" />
+              </svg>
+              <div class="health-center"><b>--</b><span>—</span></div>
+              <div class="health-name"><i data-lucide="leaf"></i> Môi trường</div>
+            </div>
+            <div class="health" id="idxWater">
+              <svg viewBox="0 0 120 120" class="health-ring" aria-hidden="true">
+                <circle cx="60" cy="60" r="52" class="ring-track" />
+                <circle cx="60" cy="60" r="52" class="ring-value" />
+              </svg>
+              <div class="health-center"><b>--</b><span>—</span></div>
+              <div class="health-name"><i data-lucide="droplet"></i> Nước cấp</div>
             </div>
           </div>
           <div class="hero-body">
@@ -111,7 +120,14 @@
           <div class="soon-list" id="soonList"></div>
         </div>
 
-        <div class="sensor-grid" id="sensorGrid"></div>
+        <section class="sensor-group">
+          <h2 class="group-title"><i data-lucide="leaf"></i> Môi trường nhà nấm <span class="group-badge" id="envBadge"></span></h2>
+          <div class="sensor-grid env" id="sensorGridEnv"></div>
+        </section>
+        <section class="sensor-group">
+          <h2 class="group-title"><i data-lucide="droplet"></i> Chất lượng nước cấp <span class="group-badge" id="waterBadge"></span></h2>
+          <div class="sensor-grid water" id="sensorGridWater"></div>
+        </section>
 
         <div class="split">
           <div class="card reveal">

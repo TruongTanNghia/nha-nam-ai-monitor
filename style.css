@@ -206,16 +206,19 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
     radial-gradient(80% 140% at 100% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 60%),
     var(--surface);
 }
-.health { position: relative; width: 128px; height: 128px; --lv: var(--ok); }
+.indices { display: flex; gap: 22px; }
+.health { position: relative; width: 112px; --lv: var(--ok); }
 .health[data-level="info"] { --lv: var(--info); }
 .health[data-level="warning"] { --lv: var(--warn); }
 .health[data-level="critical"] { --lv: var(--crit); }
-.health-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.health-ring { width: 112px; height: 112px; transform: rotate(-90deg); display: block; }
 .ring-track { fill: none; stroke: var(--surface-3); stroke-width: 10; }
 .ring-value { fill: none; stroke: var(--lv); stroke-width: 10; stroke-linecap: round; stroke-dasharray: 0 400; transition: stroke-dasharray 0.8s cubic-bezier(.2, .8, .2, 1), stroke 0.3s; }
-.health-center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
-.health-center b { font-family: var(--font-mono); font-size: 38px; line-height: 1; letter-spacing: -0.04em; }
-.health-center span { font-size: 12px; color: var(--ink-2); font-weight: 600; margin-top: 4px; }
+.health-center { position: absolute; top: 0; left: 0; width: 112px; height: 112px; display: grid; place-content: center; text-align: center; }
+.health-name { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+.health-name svg { width: 15px; height: 15px; color: var(--lv); }
+.health-center b { font-family: var(--font-mono); font-size: 32px; line-height: 1; letter-spacing: -0.04em; }
+.health-center span { font-size: 11.5px; color: var(--ink-2); font-weight: 600; margin-top: 4px; max-width: 78px; line-height: 1.2; justify-self: center; }
 
 .eyebrow { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 .eyebrow svg { width: 14px; height: 14px; color: var(--s-light); }
@@ -249,7 +252,17 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .eta b { font-family: var(--font-mono); }
 
 /* ================= SENSOR TILES ================= */
+.sensor-group { margin-bottom: 6px; }
+.group-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: -0.01em; margin: 6px 0 12px; }
+.group-title svg { color: var(--ink-3); }
+.group-badge { font-family: var(--font-body); font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); }
+.group-badge[data-level="info"] { background: var(--info-soft); color: var(--info); }
+.group-badge[data-level="warning"] { background: var(--warn-soft); color: var(--warn); }
+.group-badge[data-level="critical"] { background: var(--crit-soft); color: var(--crit); }
 .sensor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
+.sensor-grid.env { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 1760px) { .sensor-grid.env { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.sensor-grid.water { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .sensor { position: relative; overflow: hidden; padding: 18px 18px 14px; --lv: var(--ok); }
 .sensor::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--c); opacity: 0.9; }
 .sensor[data-level="info"] { --lv: var(--info); }
@@ -507,7 +520,8 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
   .hero-summary { font-size: 18px; }
   .device-strip { grid-column: auto; width: 100%; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
   .dev { font-size: 10px; padding: 8px 2px; }
-  .sensor-grid { grid-template-columns: 1fr; gap: 12px; }
+  .sensor-grid, .sensor-grid.env, .sensor-grid.water { grid-template-columns: 1fr; gap: 12px; }
+  .indices { justify-content: center; }
   .reading .value { font-size: 36px; }
   .card { padding: 16px; }
   .card-head .btn-row { flex-wrap: wrap; }

@@ -11,6 +11,7 @@ import time
 import numpy as np
 
 import config
+import indices
 
 from forecast import eta_text, forecast_all, rate_text, sentence
 from sensors import SENSORS, SENSOR_KEYS, fmt, is_valid, lname, num, thresholds
@@ -23,7 +24,6 @@ except ImportError:  # vẫn chạy được phần luật nếu thiếu scikit-
 log = logging.getLogger("analyzer")
 
 SEV_RANK = {"ok": 0, "info": 1, "warning": 2, "critical": 3, "fault": 3}
-PENALTY = {"info": 3, "warning": 12, "critical": 25}
 
 # Độ lệch chuẩn tối thiểu để chuẩn hoá (tránh chia ~0 khi dữ liệu đứng yên)
 MIN_STD = {"t": 0.5, "h": 2, "ANHSANG": 50, "GT_AMDAT": 2, "GT_DOMAN": 20, "GT_PH": 0.1}
@@ -223,6 +223,7 @@ class Analyzer:
                 "ml_anomaly", "warning", "ml",
                 "AI phát hiện trạng thái bất thường",
                 "Tổ hợp chỉ số khác hẳn 24h qua: " + "; ".join(parts) + ".",
+                contrib[0]["sensor"],
             )
         return result, None
 
@@ -383,21 +384,24 @@ class Analyzer:
         forecasts, fc_findings = self._forecasts(rows, now, th)
         findings += fc_findings
 
-        # Điểm sức khỏe
-        penalty = sum(PENALTY.get(f["severity"], 0) for f in findings)
-        for s in sensors.values():  # trạng thái tức thời chưa kéo dài cũng trừ nhẹ
-            if s["level"] in ("warning",):
-                penalty += 4
-            elif s["level"] in ("critical", "fault"):
-                penalty += 8
-        health = max(0, 100 - penalty)
-        label = "Tốt" if health >= 85 else "Khá" if health >= 65 else "Cần chú ý" if health >= 40 else "Nguy hiểm"
+        # Hai chỉ số riêng: môi trường nhà nấm và chất lượng nước cấp (không trung bình hóa với nhau)
+        idx = indices.compute(sensors, findings, data, th)
+        # Cảnh báo riêng cho nước cấp, chỉ khi lệch kéo dài >= 1 phút (pH dao động sát ngưỡng không gây báo liên tục)
+        if idx["water"]["locks"]:
+            win = _window(rows, now, 60)
+            if win and all(indices.water_locks(r, th) for r in win):
+                ph_lock = any("pH" in lock["reason"] for lock in idx["water"]["locks"])
+                findings.append(finding(
+                    "water_locked", "critical", "water", "Nước cấp không đạt",
+                    idx["water"]["lock_text"], "GT_PH" if ph_lock else "GT_DOMAN",
+                ))
 
         findings.sort(key=lambda f: -SEV_RANK[f["severity"]])
         return {
             "ts": now,
-            "health": {"score": health, "label": label},
-            "summary": self._summary(findings),
+            "health": idx["overall"],
+            "indices": idx,
+            "summary": self._summary(findings, idx),
             "sensors": sensors,
             "findings": findings,
             "forecasts": forecasts,
@@ -495,8 +499,12 @@ class Analyzer:
         return out
 
     @staticmethod
-    def _summary(findings):
+    def _summary(findings, idx):
         important = [f for f in findings if SEV_RANK[f["severity"]] >= 2]
+        lock = idx["water"]["lock_text"]
+        if lock:
+            others = [f["title"] for f in important if f.get("sensor") not in indices.WATER_SENSORS]
+            return lock + (" Môi trường: " + "; ".join(others[:2]) + "." if others else "")
         if not important:
             minor = len(findings)
             return "Mọi chỉ số đang ổn định." + (f" Có {minor} ghi chú nhỏ để theo dõi." if minor else "")

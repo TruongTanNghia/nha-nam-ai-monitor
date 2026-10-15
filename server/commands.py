@@ -3,6 +3,7 @@ import logging
 import time
 import unicodedata
 
+import indices
 import llm
 from analyzer import SEV_RANK
 from engine import SEV_ICON, now_text
@@ -138,11 +139,10 @@ class CommandHandler:
         for key, name in (("BOM", "Bơm"), ("DEN", "Đèn"), ("QUAT", "Quạt"), ("SUONG", "Sương")):
             devs.append(f"{name} {'🟢' if data.get(key) == 1 else '⚪'}")
         door = "Mở" if data.get("MO") == 1 else "Đóng" if data.get("DONG") == 1 else "—"
-        health = a.get("health", {})
+        idx_lines = "\n".join(indices.summary_lines(a.get("indices")))
         return (
-            f"🍄 TRẠNG THÁI NHÀ NẤM\n{e.readings_line()}\n"
+            f"🍄 TRẠNG THÁI NHÀ NẤM\n{idx_lines}\n{e.readings_line()}\n"
             f"🔧 {' | '.join(devs)} | Màn che: {door}\n"
-            f"💚 Sức khỏe: {health.get('score', '—')}/100 ({health.get('label', '—')})\n"
             f"📝 {a.get('summary', '')}\n🕒 {now_text(snap['last_ok_ts'])}"
         )
 
@@ -150,7 +150,7 @@ class CommandHandler:
         a = self.engine.snapshot()["analysis"]
         if not a:
             return "⏳ Chưa có dữ liệu phân tích."
-        lines = [f"🧪 PHÂN TÍCH — sức khỏe {a['health']['score']}/100 ({a['health']['label']})"]
+        lines = ["🧪 PHÂN TÍCH", *indices.summary_lines(a.get("indices"))]
         if a["findings"]:
             for f in a["findings"][:8]:
                 lines.append(f"{SEV_ICON[f['severity']]} {f['title']}: {f['detail']}")

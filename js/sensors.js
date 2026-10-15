@@ -125,3 +125,56 @@ export function thresholdText(key, th) {
   const dir = key === "t" || key === "GT_DOMAN" ? "Tối đa" : "Tối thiểu";
   return `${dir} ${fmtWithUnit(key, v)}`;
 }
+
+/* ===== Hai chỉ số tách riêng (giống server/indices.py) ===== */
+export const WATER_KEYS = ["GT_PH", "GT_DOMAN"];
+
+/** Thiết bị firmware đang khóa vì nước: pH ngoài khoảng -> bơm + phun sương; mặn vượt ngưỡng -> bơm */
+export function waterLocks(data, th) {
+  const locks = [];
+  const ph = num(data?.GT_PH), sal = num(data?.GT_DOMAN);
+  if (ph !== null) {
+    if (!th.SET_PHLOW || !th.SET_PHHIGH) {
+      locks.push({ devices: ["máy bơm tưới", "phun sương"], reason: "chưa cài đủ ngưỡng pH nên ESP32 coi pH là lệch" });
+    } else if (ph < th.SET_PHLOW || ph > th.SET_PHHIGH) {
+      locks.push({ devices: ["máy bơm tưới", "phun sương"], reason: `pH ${fmtValue("GT_PH", ph)} ngoài khoảng ${th.SET_PHLOW}–${th.SET_PHHIGH}` });
+    }
+  }
+  if (sal !== null && th.SET_DOMAN && sal > th.SET_DOMAN) {
+    locks.push({ devices: ["máy bơm tưới"], reason: `độ mặn ${fmtWithUnit("GT_DOMAN", sal)} vượt ${fmtWithUnit("GT_DOMAN", th.SET_DOMAN)}` });
+  }
+  return locks;
+}
+
+export function lockText(locks) {
+  const devices = [...new Set(locks.flatMap((l) => l.devices))];
+  if (!devices.length) return null;
+  return `Nước cấp không đạt — ${devices.join(" và ")} đang bị khóa (${locks.map((l) => l.reason).join("; ")}). ` +
+    "Kiểm tra nguồn nước, lọc nước hoặc thay nước.";
+}
+
+/** Đánh giá cơ bản trên trình duyệt khi không có máy chủ AI */
+export function localIndices(data) {
+  const th = thresholds(data);
+  const pen = { env: 0, water: 0 };
+  const issues = { env: [], water: [] };
+  for (const s of SENSORS) {
+    const st = sensorStatus(s.key, num(data?.[s.key]), th);
+    const g = WATER_KEYS.includes(s.key) ? "water" : "env";
+    if (SEV_RANK[st.level] >= 2) {
+      pen[g] += st.level === "warning" ? 12 : 25;
+      issues[g].push(`${s.name}: ${st.text.toLowerCase()}`);
+    }
+  }
+  const locks = waterLocks(data, th);
+  const env = Math.max(0, 100 - pen.env);
+  let water = Math.max(0, 100 - pen.water);
+  if (locks.length) water = Math.min(water, 35);
+  return {
+    environment: { score: env, label: env >= 85 ? "Tốt" : env >= 65 ? "Khá" : env >= 40 ? "Cần chú ý" : "Nguy hiểm", issues: issues.env },
+    water: {
+      score: water, label: locks.length || water < 50 ? "Không đạt" : water < 85 ? "Cần theo dõi" : "Đạt",
+      issues: issues.water, locks, lock_text: lockText(locks),
+    },
+  };
+}
