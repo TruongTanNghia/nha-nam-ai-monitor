@@ -14,7 +14,7 @@ import { $, $$, esc, fmtClock, icon, refreshIcons, setHTML, timeAgo, toast } fro
 import { buildChartCards, gaugeSVG, renderCharts, resetCharts, sparkline, updateGauge } from "./js/charts.js";
 import {
   backend, bindAIControls, connect, fetchHistory, refreshAlerts, refreshHealth,
-  refreshSnapshot, renderAnalysis, renderEvents, renderZalo,
+  fmtEta, rateText, refreshSnapshot, renderAnalysis, renderEvents, renderZalo,
 } from "./js/ai.js";
 
 const firebaseConfig = {
@@ -164,9 +164,12 @@ function renderSensorTiles(data) {
     const { min, max, marks } = gaugeRange(s, value, th);
     updateGauge(tile.querySelector(".gauge-svg"), value, min, max, marks);
 
+    // Dòng cuối thẻ: ngưỡng + dự báo (vd "Tối thiểu 60% · 4′ nữa bật phun sương")
     let trend = "";
     const fc = analysis?.forecasts?.[s.key];
-    if (fc && fc.trend !== "flat") trend = ` · ${fc.trend === "up" ? "↗" : "↘"} ${fmtValue(s.key, fc.in30)} sau 30′`;
+    const next = fc?.events.filter((e) => e.eta_min !== null).sort((x, y) => x.eta_min - y.eta_min)[0];
+    if (next) trend = ` · ${fmtEta(next.eta_min)} nữa ${next.action}`;
+    else if (fc && fc.trend !== "flat") trend = ` · ${fc.trend === "up" ? "↗" : "↘"} ${rateText(s.key, fc.rate_per_min)}`;
     tile.querySelector(".threshold").textContent = thresholdText(s.key, th) + trend;
 
     const series = state.live.slice(-40).map((p) => p[s.key]);

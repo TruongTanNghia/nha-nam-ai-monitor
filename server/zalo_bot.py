@@ -111,10 +111,12 @@ class ZaloBot:
             return []
 
         if not body.get("ok"):
-            # 408 = không có tin nhắn mới trong thời gian chờ
+            # 408 = chưa có tin nhắn mới. Zalo có thể trả ngay thay vì giữ kết nối -> nghỉ 1 giây
             if body.get("error_code") not in (408, None):
                 log.warning("getUpdates: %s", body)
                 time.sleep(5)
+            else:
+                time.sleep(1)
             return []
 
         result = body.get("result") or []

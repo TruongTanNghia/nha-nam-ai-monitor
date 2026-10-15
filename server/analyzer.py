@@ -12,6 +12,7 @@ import numpy as np
 
 import config
 
+from forecast import eta_text, forecast_all, rate_text, sentence
 from sensors import SENSORS, SENSOR_KEYS, fmt, is_valid, lname, num, thresholds
 
 try:
@@ -227,47 +228,38 @@ class Analyzer:
 
     # ------------------------------------------------------------ Forecast
     def _forecasts(self, rows, now, th):
-        out, findings = {}, []
-        for key in SENSOR_KEYS:
-            pts = [(ts, v) for ts, v in _values(rows, key) if ts >= now - 1200 and is_valid(key, v)]
-            if len(pts) < 20 or pts[-1][0] - pts[0][0] < 600:
-                continue
-            t = np.array([(ts - now) / 60 for ts, _ in pts])  # phút, hiện tại = 0
-            y = np.array([v for _, v in pts])
-            slope, intercept = np.polyfit(t, y, 1)
-            pred = y - (slope * t + intercept)
-            ss_tot = float(((y - y.mean()) ** 2).sum())
-            r2 = 1 - float((pred ** 2).sum()) / ss_tot if ss_tot > 1e-9 else 0.0
-            lo, hi = SENSORS[key]["phys"]
-            current = min(max(float(intercept), lo), hi)
-            in30 = min(max(float(intercept + slope * 30), lo), hi)
-            flat_eps = MIN_STD[key] / 30  # thay đổi < ~1σ_min mỗi 30 phút coi như đi ngang
-            trend = "flat" if abs(slope) < flat_eps else ("up" if slope > 0 else "down")
-
-            eta, eta_level = None, None
-            now_level = SEV_RANK[sensor_status(key, current, th)[0]]
-            if r2 >= 0.6 and trend != "flat":
-                for m in range(1, 31):
-                    lvl, _ = sensor_status(key, intercept + slope * m, th)
-                    if SEV_RANK[lvl] >= 2 and SEV_RANK[lvl] > now_level:
-                        eta, eta_level = m, lvl
+        """Dự báo hành động (forecast.py) + cảnh báo sớm khi xu hướng sắp chạm mức nguy hiểm."""
+        out = forecast_all(rows, now, th)
+        findings = []
+        for key, f in out.items():
+            # Sắp chạm mức cảnh báo/nguy hiểm theo đánh giá sức khỏe (không chỉ ngưỡng thiết bị)
+            f["eta_min"], f["eta_level"] = None, None
+            if f["trend"] != "flat":
+                now_level = SEV_RANK[sensor_status(key, f["now"], th)[0]]
+                lo, hi = SENSORS[key]["phys"]
+                for m in range(1, 61):
+                    # kẹp trong giới hạn vật lý: kéo dài xu hướng quá xa không được thành "lỗi cảm biến"
+                    value = min(max(f["now"] + f["rate_per_min"] * m, lo), hi)
+                    lvl, _ = sensor_status(key, value, th)
+                    if lvl != "fault" and SEV_RANK[lvl] >= 2 and SEV_RANK[lvl] > now_level:
+                        f["eta_min"], f["eta_level"] = m, lvl
                         break
-
-            out[key] = {
-                "now": round(current, 2), "in30": round(in30, 2),
-                "slope_per_hour": round(float(slope) * 60, 2),
-                "r2": round(r2, 2), "trend": trend, "eta_min": eta, "eta_level": eta_level,
-            }
-            if eta is not None:
-                sev = "warning" if eta_level == "critical" and eta <= 20 else "info"
+            if f["eta_min"] is not None:
+                sev = "warning" if f["eta_level"] == "critical" and f["eta_min"] <= 20 else "info"
                 findings.append(finding(
                     f"forecast_{key}", sev, "forecast",
-                    f"Dự báo: {lname(key)} sắp vượt mức an toàn",
-                    f"Theo xu hướng 20 phút qua ({out[key]['slope_per_hour']:+g}/giờ), "
-                    f"{lname(key)} có thể chạm mức {'nguy hiểm' if eta_level == 'critical' else 'cảnh báo'} "
-                    f"sau khoảng {eta} phút.",
+                    f"Dự báo: {lname(key)} sắp tới mức {'nguy hiểm' if f['eta_level'] == 'critical' else 'cảnh báo'}",
+                    f"{SENSORS[key]['name']} đang {rate_text(key, f['rate_per_min'])}, "
+                    f"{eta_text(f['eta_min'])} nữa sẽ tới mức {'nguy hiểm' if f['eta_level'] == 'critical' else 'cảnh báo'}.",
                     key,
                 ))
+            # Thiết bị sắp được ESP32 bật/ngắt trong 15 phút tới
+            for e in f["events"]:
+                if e["kind"] == "trigger" and e["eta_min"] <= 15:
+                    findings.append(finding(
+                        f"soon_{key}_{e['setting']}", "info", "forecast",
+                        f"Sắp {e['action']}", sentence(e["text"]) + ".", key,
+                    ))
         return out, findings
 
     # ---------------------------------------------------------- Main entry

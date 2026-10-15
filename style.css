@@ -228,6 +228,20 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .dev.on { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
 .dev.on svg { color: var(--accent); }
 
+/* ================= DỰ BÁO THIẾT BỊ ================= */
+.forecast-card { margin-bottom: 18px; }
+.soon-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 10px; }
+.soon { display: flex; gap: 14px; align-items: center; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); border-left: 4px solid var(--sk, var(--info)); }
+.soon.trigger { --sk: var(--warn); }
+.soon.recover { --sk: var(--ok); }
+.soon.active { --sk: var(--info); }
+.soon-eta { min-width: 58px; text-align: center; font-family: var(--font-mono); font-size: 22px; letter-spacing: -0.04em; color: var(--sk); }
+.soon-eta svg { width: 22px; height: 22px; }
+.soon-text { font-weight: 600; font-size: 14px; }
+.soon small { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+.soon .empty, .soon-list .empty { grid-column: 1 / -1; }
+.eta b { font-family: var(--font-mono); }
+
 /* ================= SENSOR TILES ================= */
 .sensor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
 .sensor { position: relative; overflow: hidden; padding: 18px 18px 14px; --lv: var(--ok); }

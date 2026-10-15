@@ -11,6 +11,7 @@ import llm
 from analyzer import SEV_RANK, Analyzer
 from controller import AutoController, explain_auto
 from firebase_client import Firebase
+from forecast import sentence, upcoming
 from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, SENSOR_KEYS, SENSORS, fmt, num, thresholds
 from storage import Storage
 from zalo_bot import ZaloBot
@@ -319,7 +320,9 @@ class Engine:
                 {"muc": f["severity"], "tieu_de": f["title"], "chi_tiet": f["detail"]}
                 for f in analysis.get("findings", [])
             ],
-            "du_bao_30_phut": analysis.get("forecasts"),
+            "du_bao_thiet_bi": {
+                SENSORS[k]["name"]: f["headline"] for k, f in (analysis.get("forecasts") or {}).items()
+            },
             f"thong_ke_{hours}h": self.stats(hours),
         }
 
@@ -400,7 +403,7 @@ class Engine:
         """Nhận định AI cho tin định kỳ: viết lại mỗi PERIODIC_AI_MIN phút hoặc khi danh sách vấn đề đổi."""
         if not llm.status()["enabled"]:
             return None
-        keys = frozenset(f["key"] for f in analysis["findings"])
+        keys = frozenset(f["key"] for f in analysis["findings"] if SEV_RANK[f["severity"]] >= 2)
         stale = time.time() - self.periodic_ai_ts >= config.PERIODIC_AI_MIN * 60
         if self.periodic_ai_text is None or stale or keys != self.periodic_ai_keys:
             text = llm.ask(
@@ -433,6 +436,9 @@ class Engine:
             important = [f for f in analysis["findings"] if SEV_RANK[f["severity"]] >= 2]
             if important:
                 lines.append("⚠️ " + "; ".join(f["title"] for f in important[:3]))
+            soon = upcoming(analysis.get("forecasts") or {}, 3)
+            if soon:
+                lines.append("🔮 Dự báo:\n" + "\n".join(f"• {sentence(e['text'])}" for e in soon))
             ai = self._periodic_ai(analysis)
             if ai:
                 age = int((time.time() - self.periodic_ai_ts) / 60)

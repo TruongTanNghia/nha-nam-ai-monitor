@@ -143,6 +143,7 @@ export function renderAnalysis() {
       : emptyState("circle-check", "Không phát hiện bất thường", "Luật chuyên gia, model ML và dự báo đều cho kết quả tốt."));
 
   renderForecast(a);
+  renderSoon();
   renderML(a);
 
   const llm = backend.health?.llm;
@@ -151,29 +152,76 @@ export function renderAnalysis() {
     : llm?.enabled ? `${llm.provider} · ${llm.model}` : "Chưa cấu hình LLM — thêm LLM_API_KEY trong server/.env";
 }
 
+const ARROW = { up: "trending-up", down: "trending-down", flat: "move-right" };
+
+/** "khoảng 4 phút nữa ..." -> "Khoảng 4 phút nữa ..." */
+const cap = (text) => (!text || text.startsWith("pH") ? text || "" : text[0].toUpperCase() + text.slice(1));
+
+export function fmtEta(min) {
+  if (min === null || min === undefined) return "";
+  if (min < 1) return "<1′";
+  return min < 60 ? `${Math.round(min)}′` : `${(min / 60).toFixed(1).replace(".0", "")}h`;
+}
+
+/** Thẻ "Dự báo thiết bị" ở trang tổng quan: các sự kiện sắp xảy ra, gần nhất trước */
+export function renderSoon() {
+  const el = $("#soonList");
+  if (!backend.online) {
+    return setHTML(el, emptyState("server-off", "Cần Máy chủ AI", "Chạy python server/app.py để xem bao lâu nữa thiết bị sẽ bật/tắt."));
+  }
+  const fc = backend.snapshot?.analysis?.forecasts || {};
+  if (!Object.keys(fc).length) {
+    return setHTML(el, emptyState("hourglass", "Đang đo xu hướng", "Cần khoảng 1 phút dữ liệu liên tục để dự báo."));
+  }
+  const events = Object.entries(fc).flatMap(([k, f]) => f.events.map((e) => ({ ...e, sensor: k })));
+  events.sort((a, b) => (a.eta_min ?? 1e9) - (b.eta_min ?? 1e9));
+  if (!events.length) {
+    return setHTML(el, emptyState("circle-check", "Chưa có thiết bị nào sắp đổi trạng thái",
+      "Các chỉ số đang đi ngang hoặc còn xa ngưỡng."));
+  }
+  setHTML(el, events.slice(0, 5).map((e) => `
+    <div class="soon ${e.kind}">
+      <b class="soon-eta">${e.eta_min !== null ? fmtEta(e.eta_min) : icon("activity")}</b>
+      <div>
+        <div class="soon-text">${esc(cap(e.text))}</div>
+        <small><span class="swatch" style="background:var(${SENSOR_BY_KEY[e.sensor].color})"></span>
+          ${esc(SENSOR_BY_KEY[e.sensor].name)} ${fmtWithUnit(e.sensor, fc[e.sensor].now)}
+          ${fc[e.sensor].trend !== "flat" ? `· ${rateText(e.sensor, fc[e.sensor].rate_per_min)}` : ""}</small>
+      </div>
+    </div>`).join(""));
+}
+
+export function rateText(key, rate) {
+  const unit = SENSOR_BY_KEY[key].unit;
+  const digits = key === "GT_PH" ? 2 : 1;
+  const value = Math.abs(rate).toFixed(digits).replace(/\.?0+$/, "");
+  const sep = ["%", "°C", ""].includes(unit) ? "" : " ";
+  return `${rate > 0 ? "tăng" : "giảm"} ${value}${sep}${unit}/phút`;
+}
+
 function renderForecast(a) {
   const el = $("#forecastTable");
   if (!backend.online) return setHTML(el, offlineHTML());
   const fc = a?.forecasts || {};
   const keys = Object.keys(fc);
   if (!keys.length) {
-    return setHTML(el, emptyState("hourglass", "Đang thu thập dữ liệu", "Cần khoảng 10 phút dữ liệu liên tục để dự báo xu hướng."));
+    return setHTML(el, emptyState("hourglass", "Đang đo xu hướng", "Cần khoảng 1 phút dữ liệu liên tục để dự báo."));
   }
-  const arrow = { up: "trending-up", down: "trending-down", flat: "move-right" };
   const rows = keys.map((k) => {
     const f = fc[k];
-    const eta = f.eta_min
-      ? `<span class="eta ${f.eta_level}">~${f.eta_min} phút nữa chạm mức ${f.eta_level === "critical" ? "nguy hiểm" : "cảnh báo"}</span>`
-      : `<span class="eta">Độ tin cậy R² ${f.r2}</span>`;
+    const timed = f.events.filter((e) => e.eta_min !== null).sort((x, y) => x.eta_min - y.eta_min)[0];
+    const missing = f.missing_thresholds.length ? " · chưa cài ngưỡng nên chưa dự báo được thiết bị" : "";
     return `
       <div class="fc-row">
         <div class="fc-name"><span class="swatch" style="background:var(${SENSOR_BY_KEY[k].color})"></span>${esc(SENSOR_BY_KEY[k].name)}</div>
         <div class="fc-vals">
           <b>${fmtWithUnit(k, f.now)}</b>
-          ${icon(arrow[f.trend], `trend ${f.trend}`)}
-          <b>${fmtWithUnit(k, f.in30)}</b>
+          ${icon(ARROW[f.trend], `trend ${f.trend}`)}
+          <span>${f.trend === "flat" ? "đi ngang" : rateText(k, f.rate_per_min)}</span>
         </div>
-        ${eta}
+        <span class="eta ${timed?.kind === "trigger" ? "warning" : ""}">
+          ${timed ? `<b>${fmtEta(timed.eta_min)}</b> ` : ""}${esc(cap(f.headline))}${esc(missing)}
+        </span>
       </div>`;
   });
   setHTML(el, rows.join(""));

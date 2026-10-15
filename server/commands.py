@@ -6,7 +6,8 @@ import unicodedata
 import llm
 from analyzer import SEV_RANK
 from engine import SEV_ICON, now_text
-from sensors import DEVICES, SENSORS, fmt
+from forecast import sentence
+from sensors import DEVICES
 
 log = logging.getLogger("commands")
 
@@ -155,12 +156,11 @@ class CommandHandler:
                 lines.append(f"{SEV_ICON[f['severity']]} {f['title']}: {f['detail']}")
         else:
             lines.append("✅ Không phát hiện vấn đề.")
-        arrows = {"up": "↗", "down": "↘", "flat": "→"}
         fc = a.get("forecasts") or {}
         if fc:
-            lines.append("🔮 Dự báo 30 phút:")
-            for k, f in fc.items():
-                lines.append(f"• {SENSORS[k]['name']}: {fmt(k, f['now'])} {arrows[f['trend']]} {fmt(k, f['in30'])}")
+            lines.append("🔮 Dự báo:")
+            for f in fc.values():
+                lines.append(f"• {sentence(f['headline'])}")
         ml = a.get("ml") or {}
         if ml.get("trained"):
             state = "BẤT THƯỜNG" if (ml.get("latest") or {}).get("anomaly") else "bình thường"

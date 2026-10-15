@@ -59,7 +59,7 @@ Nạp firmware: sao chép `secrets.example.h` thành `secrets.h` (cùng thư m�
 - **Luật chuyên gia**: vượt ngưỡng kéo dài > 2 phút (tránh báo nhầm do nhiễu), cảm biến lỗi/phi lý, nhiễu (giật số), báo 0 liên tục, đứng yên (ESP32 mất kết nối).
 - **Thiết bị**: bơm chạy 8 phút mà đất không ẩm lên, quạt 15 phút không hạ nhiệt, phun sương không tăng ẩm, đèn bật không sáng hơn, màn che nhận cả MỞ & ĐÓNG, bật/tắt liên tục (≥ 6 lần/10 phút), bơm/phun sương chạy quá lâu.
 - **Model ML – IsolationForest**: học 24h dữ liệu (tự huấn luyện lại mỗi 30 phút), phát hiện tổ hợp chỉ số bất thường và chỉ ra cảm biến lệch nhiều nhất.
-- **Dự báo**: hồi quy tuyến tính 20 phút gần nhất → giá trị sau 30 phút và thời điểm có thể chạm mức nguy hiểm.
+- **Dự báo thiết bị** (`server/forecast.py`): từ tốc độ thay đổi trong vài phút gần nhất (cần ~1 phút dữ liệu), tính bao lâu nữa chạm ngưỡng và ESP32 sẽ làm gì — vd *“khoảng 4 phút nữa độ ẩm không khí xuống dưới 60% → ESP32 sẽ bật phun sương”*, hoặc khi nào chỉ số trở lại để tắt thiết bị. Hiện trên trang Tổng quan, tab Phân tích, tin Zalo định kỳ và lệnh `/phantich`. Cảm biến chưa cài ngưỡng (giá trị 0) thì chưa dự báo được thiết bị.
 
 ### Máy chủ AI và chế độ AUTO
 Mặc định máy chủ AI **chỉ giám sát**: khi ESP32 tự bật/tắt thiết bị, máy chủ báo Zalo kèm lý do (vd “BẬT máy bơm — độ ẩm đất 32% < ngưỡng 40%”), tối đa 1 lần / `DEVICE_NOTIFY_MIN` phút mỗi thiết bị, và cảnh báo khi thiết bị bật/tắt liên tục hoặc bơm chạy quá lâu.
