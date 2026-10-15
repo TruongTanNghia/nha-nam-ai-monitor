@@ -221,6 +221,9 @@ bool sendToFirebase(bool includeDevices) {
   doc["GT_PH"]      = GT_PH;
   doc["h"]          = h;
   doc["t"]          = t;
+  // Nhip tim: Firebase tu dien gio server -> web biet ESP32 con ket noi hay khong
+  JsonObject espTs = doc.createNestedObject("ESP_TS");
+  espTs[".sv"] = "timestamp";
 
   if (MODE == 1 || includeDevices) {
     doc["BOM"]   = BOM;

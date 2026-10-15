@@ -26,6 +26,13 @@ ESP32 ──► Firebase RTDB ◄──► Web (index.html)        ← xem & đi
 2. Windows: nhấp đúp **`chay_server.bat`** (hoặc `pip install -r server/requirements.txt` rồi `python server/app.py`).
 3. Mở http://localhost:5000. Điện thoại cùng WiFi: `http://<IP máy tính>:5000`.
 
+### Đưa ra Internet bằng Cloudflare Tunnel (máy tính làm server)
+1. Đặt mật khẩu trong `server/.env`: `APP_USER=admin`, `APP_PASSWORD=...` — **bắt buộc**, có link là ai cũng mở được.
+2. Cài `cloudflared` (`winget install Cloudflare.cloudflared`), nhấp đúp **`chay_cloudflare.bat`**.
+3. Mở link `https://....trycloudflare.com` hiện trong cửa sổ, đăng nhập bằng tài khoản ở bước 1.
+
+Link đổi mỗi lần chạy lại; muốn link cố định cần tài khoản Cloudflare + tên miền (named tunnel). Máy tính phải bật thì server AI mới chạy — ESP32 vẫn tự điều khiển nhà nấm khi máy tắt.
+
 > Không biết chat id? Nhắn `chatid` cho bot sau khi chạy server — bot trả lời ID; tab **Cảnh báo** trên web cũng liệt kê các chat đã nhắn.
 >
 > Muốn chạy thử an toàn (không ghi Firebase, không gửi Zalo): đặt `DRY_RUN=true`.
@@ -37,7 +44,7 @@ ESP32 đọc cảm biến (DHT11, BH1750, độ ẩm đất, độ mặn TDS, pH
 
 | Hướng | Nội dung | Chu kỳ |
 |---|---|---|
-| ESP → Firebase | `t h ANHSANG GT_AMDAT GT_DOMAN GT_PH` (+ trạng thái thiết bị khi AUTO) | 0.7 s |
+| ESP → Firebase | `t h ANHSANG GT_AMDAT GT_DOMAN GT_PH`, nhịp tim `ESP_TS` (+ trạng thái thiết bị khi AUTO) | 0.7 s |
 | Firebase → ESP | `SET_*`, `MODE`, lệnh thiết bị (dùng khi MANUAL) | 1 s |
 
 **Chế độ AUTO do ESP32 tự điều khiển**: đèn bật khi ánh sáng < `SET_AS`; màn che MỞ khi ánh sáng ≤ `SET_AS`, ĐÓNG khi sáng hơn; quạt bật khi nhiệt độ > `SET_T`; phun sương bật khi độ ẩm < `SET_H`; bơm bật khi độ ẩm đất < `SET_AMDAT`. Bơm bị ngắt khi độ mặn > `SET_DOMAN`; bơm và phun sương bị ngắt khi pH ngoài `SET_PHLOW`–`SET_PHHIGH`.
@@ -49,7 +56,7 @@ Nạp firmware: sao chép `secrets.example.h` thành `secrets.h` (cùng thư m�
 
 | Phần | Nội dung |
 |---|---|
-| **Tổng quan** | Điểm sức khỏe 0–100, nhận định AI, 6 thẻ cảm biến (đồng hồ + ngưỡng + xu hướng), trạng thái thiết bị, vấn đề & lịch sử bật/tắt |
+| **Tổng quan** | Trạng thái kết nối ESP32 (đã kết nối / chậm / mất kết nối + từ bao giờ), điểm sức khỏe 0–100, nhận định AI, 6 thẻ cảm biến (đồng hồ + ngưỡng + xu hướng), trạng thái thiết bị, vấn đề & lịch sử bật/tắt |
 | **Điều khiển** | Công tắc thiết bị, màn che, cài ngưỡng (có đơn vị & giải thích) |
 | **Biểu đồ** | Trực tiếp / 1h / 6h / 24h / 7 ngày, đường ngưỡng, thấp–TB–cao |
 | **Phân tích AI** | Danh sách vấn đề, dự báo 30 phút, trạng thái model ML, báo cáo AI, chat hỏi đáp |

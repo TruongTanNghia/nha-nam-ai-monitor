@@ -169,6 +169,9 @@ export function renderSoon() {
   if (!backend.online) {
     return setHTML(el, emptyState("server-off", "Cần Máy chủ AI", "Chạy python server/app.py để xem bao lâu nữa thiết bị sẽ bật/tắt."));
   }
+  if (backend.hardwareOffline) {
+    return setHTML(el, emptyState("unplug", "Tạm dừng dự báo", "ESP32 đang mất kết nối nên số liệu đã cũ, dự báo sẽ chạy lại khi bo mạch gửi dữ liệu."));
+  }
   const fc = backend.snapshot?.analysis?.forecasts || {};
   if (!Object.keys(fc).length) {
     return setHTML(el, emptyState("hourglass", "Đang đo xu hướng", "Cần khoảng 1 phút dữ liệu liên tục để dự báo."));

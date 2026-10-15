@@ -263,7 +263,7 @@ class Analyzer:
         return out, findings
 
     # ---------------------------------------------------------- Main entry
-    def evaluate(self, data, rows, now=None):
+    def evaluate(self, data, rows, now=None, hw_last_change=None):
         """data: bản ghi Firebase mới nhất; rows: lịch sử gần đây (cũ -> mới, đã gồm bản mới nhất)."""
         now = now or time.time()
         th = thresholds(data)
@@ -336,15 +336,28 @@ class Analyzer:
                 "GT_AMDAT",
             ))
 
+        # Nhịp tim ESP32 (firmware ghi ESP_TS = giờ Firebase mỗi lần gửi): chính xác hơn việc đoán số liệu đứng yên
+        esp_ts = num(data.get("ESP_TS"))
+        if esp_ts and now - esp_ts / 1000 > 120:
+            findings.append(finding(
+                "esp_offline", "critical", "system",
+                "ESP32 mất kết nối",
+                f"Không nhận được dữ liệu từ bo mạch {int((now - esp_ts / 1000) // 60)} phút. "
+                "Kiểm tra nguồn điện, WiFi của ESP32 rồi nhấn reset. Nhà nấm đang không được tự động điều khiển.",
+            ))
+
         win10 = _window(rows, now, 600)
         if win10 and len(win10) >= 20:
             first = tuple(win10[0].get(k) for k in SENSOR_KEYS)
             if all(tuple(r.get(k) for k in SENSOR_KEYS) == first for r in win10):
+                since = hw_last_change or win10[0]["ts"]
+                minutes = (now - since) / 60
+                long_ago = f"{minutes / 60:.0f} giờ" if minutes >= 90 else f"{minutes:.0f} phút"
                 findings.append(finding(
-                    "stale_all", "warning", "system",
-                    "Dữ liệu cảm biến không thay đổi",
-                    "Tất cả chỉ số đứng yên 10 phút. ESP32 có thể đã mất WiFi/Firebase hoặc bị treo — "
-                    "thử khởi động lại bo mạch.",
+                    "stale_all", "critical" if minutes >= 30 else "warning", "system",
+                    "ESP32 có thể đã mất kết nối",
+                    f"Tất cả chỉ số đứng yên {long_ago}. ESP32 có thể đã mất điện, mất WiFi hoặc bị treo — "
+                    "kiểm tra nguồn, WiFi rồi nhấn reset bo mạch. Trong lúc này nhà nấm không được tự động điều khiển.",
                 ))
             else:
                 win60 = _window(rows, now, 3600)

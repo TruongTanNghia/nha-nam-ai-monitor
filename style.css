@@ -160,6 +160,12 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .conn { display: flex; align-items: center; gap: 10px; opacity: 0.8; }
 .conn .dot { width: 8px; height: 8px; border-radius: 50%; background: #c06a5f; box-shadow: 0 0 0 3px rgba(192, 106, 95, 0.2); }
 .conn.on .dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(200, 227, 91, 0.2); animation: pulse 2.4s infinite; }
+.conn.warn .dot { background: #e2a43c; box-shadow: 0 0 0 3px rgba(226, 164, 60, 0.25); }
+.hw-banner { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; margin-bottom: 18px; border-radius: 14px; background: var(--crit-soft); border: 1px solid color-mix(in srgb, var(--crit) 35%, transparent); color: var(--ink); font-size: 14px; }
+.hw-banner svg { color: var(--crit); margin-top: 2px; }
+.hw-banner[hidden] { display: none; }
+.chip.bad { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 35%, var(--line)); }
+.chip.bad svg { color: var(--crit); }
 .theme-btn { display: flex; align-items: center; gap: 10px; margin-top: 6px; padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.16); background: transparent; color: inherit; font-size: 13px; }
 .theme-btn:hover { background: rgba(255, 255, 255, 0.08); }
 

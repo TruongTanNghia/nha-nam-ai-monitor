@@ -2,6 +2,7 @@
 
 Chạy:  python server/app.py   rồi mở http://localhost:5000
 """
+import hmac
 import logging
 import sys
 import time
@@ -12,7 +13,7 @@ for stream in (sys.stdout, sys.stderr):  # console Windows mặc định không 
     if hasattr(stream, "reconfigure"):
         stream.reconfigure(encoding="utf-8", errors="replace")
 
-from flask import Flask, abort, jsonify, request, send_from_directory  # noqa: E402
+from flask import Flask, Response, abort, jsonify, request, send_from_directory  # noqa: E402
 
 import config  # noqa: E402
 import llm  # noqa: E402
@@ -30,6 +31,24 @@ engine = Engine()
 
 STATIC_EXT = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".ico", ".webp"}
 BLOCKED_DIRS = {"server", "Nhom5_Intrusion_Warning"}
+
+
+def _same(a, b):
+    return hmac.compare_digest((a or "").encode(), (b or "").encode())
+
+
+@app.before_request
+def require_password():
+    """Bật khi đặt APP_PASSWORD: cả web lẫn API đều cần đăng nhập (bắt buộc khi đưa ra Internet)."""
+    if not config.APP_PASSWORD or request.method == "OPTIONS":
+        return None
+    auth = request.authorization
+    if auth and _same(auth.username, config.APP_USER) and _same(auth.password, config.APP_PASSWORD):
+        return None
+    return Response(
+        "Cần đăng nhập để vào Nhà Nấm", 401,
+        {"WWW-Authenticate": 'Basic realm="Nha Nam", charset="UTF-8"'},
+    )
 
 
 @app.after_request

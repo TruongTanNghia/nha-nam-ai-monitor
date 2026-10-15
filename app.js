@@ -37,6 +37,10 @@ const LIVE_MAX_POINTS = 360; // ~30 phút với chu kỳ 5 giây
 const state = {
   data: null,
   lastDataAt: null,
+  firstDataAt: null,
+  sensorChangedAt: null,  // lần cuối số liệu cảm biến thay đổi (ESP32 còn gửi)
+  sensorSig: null,
+  serverTimeOffset: 0,
   live: [],            // [{ts, t, h, ...}] dữ liệu trực tiếp trong trình duyệt
   range: "live",
   busy: false,
@@ -214,7 +218,7 @@ function renderHero(data) {
   const llm = backend.health?.llm;
   const zalo = backend.health?.zalo;
   const chips = [
-    [state.lastDataAt && Date.now() - state.lastDataAt < 60000 ? "ok" : "warn", "radio", state.lastDataAt ? `Cảm biến · ${timeAgo(state.lastDataAt)}` : "Chưa có dữ liệu"],
+    (() => { const hw = renderHardware(); return [hw.level === "ok" ? "ok" : hw.level === "off" ? "bad" : "warn", "cpu", hw.text]; })(),
     [backend.online ? "ok" : "off", "server", backend.online ? "Máy chủ AI" : "Máy chủ AI tắt"],
     [zalo?.configured ? "ok" : "off", "message-circle", zalo?.configured ? "Zalo đã kết nối" : "Zalo chưa cấu hình"],
     [llm?.enabled ? "ok" : "off", "sparkles", llm?.enabled ? `LLM · ${llm.model}` : "LLM chưa cấu hình"],
@@ -414,6 +418,52 @@ function renderAll() {
   $("#lastUpdate").textContent = `Cập nhật lúc ${fmtClock(state.lastDataAt)} · ${new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit" })}`;
 }
 
+/* =========================
+   KẾT NỐI PHẦN CỨNG (ESP32)
+   - Có ESP_TS (firmware gửi nhịp tim, Firebase đóng dấu giờ): đo chính xác.
+   - Không có: dựa vào lần cuối số liệu cảm biến thay đổi (pH, ánh sáng là analog nên luôn dao động).
+========================= */
+function hardwareStatus() {
+  const data = state.data;
+  if (!data) return { level: "wait", text: "Đang kết nối Firebase…" };
+  const now = Date.now();
+  const espTs = Number(data.ESP_TS);
+  let age, exact = false;
+  if (espTs > 0) {
+    age = (now + state.serverTimeOffset - espTs) / 1000;
+    exact = true;
+  } else {
+    const serverChange = backend.snapshot?.hardware?.last_change_ts;
+    const seen = [state.sensorChangedAt, serverChange ? serverChange * 1000 : null].filter(Boolean);
+    if (seen.length) age = (now - Math.max(...seen)) / 1000;
+    else if (now - state.firstDataAt < 60000) return { level: "wait", text: "Đang kiểm tra ESP32…" };
+    else age = (now - state.firstDataAt) / 1000;
+  }
+  const [okSec, offSec] = exact ? [20, 120] : [60, 300];
+  const ago = timeAgo(now - Math.max(0, age) * 1000);
+  if (age < okSec) return { level: "ok", age, text: `ESP32 đã kết nối · ${ago}` };
+  if (age < offSec) return { level: "warn", age, text: `ESP32 phản hồi chậm · ${ago}` };
+  return { level: "off", age, text: `ESP32 mất kết nối · lần cuối ${ago}` };
+}
+
+function renderHardware() {
+  const hw = hardwareStatus();
+  backend.hardwareOffline = hw.level === "off";
+  const conn = $("#connEsp");
+  conn.classList.toggle("on", hw.level === "ok");
+  conn.classList.toggle("warn", hw.level === "warn" || hw.level === "wait");
+  conn.title = hw.text;
+  const banner = $("#hwBanner");
+  banner.hidden = hw.level !== "off";
+  if (hw.level === "off") {
+    setHTML(banner, `${icon("unplug")}<div><b>${esc(hw.text)}.</b> Số liệu trên trang có thể đã cũ. ` +
+      `Kiểm tra nguồn điện và WiFi của bo mạch ESP32, rồi nhấn nút reset trên bo.</div>`);
+  }
+  return hw;
+}
+
+onValue(ref(db, ".info/serverTimeOffset"), (snap) => { state.serverTimeOffset = snap.val() || 0; });
+
 onValue(ref(db, ".info/connected"), (snap) => {
   $("#connFirebase").classList.toggle("on", snap.val() === true);
 });
@@ -422,6 +472,10 @@ onValue(ref(db, "/"), (snapshot) => {
   if (!snapshot.exists()) return;
   state.data = snapshot.val();
   state.lastDataAt = Date.now();
+  state.firstDataAt ??= state.lastDataAt;
+  const sig = SENSORS.map((s) => state.data[s.key]).join("|");
+  if (state.sensorSig !== null && sig !== state.sensorSig) state.sensorChangedAt = state.lastDataAt;
+  state.sensorSig = sig;
   pushLive(state.data);
   renderAll();
   if (state.range === "live") renderChartTab();

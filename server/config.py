@@ -50,6 +50,9 @@ POLL_INTERVAL_SEC = _int("POLL_INTERVAL_SEC", 5)
 # ---------- Web server ----------
 HOST = _str("HOST", "0.0.0.0")
 PORT = _int("PORT", 5000)
+# Đăng nhập web + API (bắt buộc khi đưa ra Internet qua Cloudflare Tunnel). Để trống = không cần đăng nhập
+APP_USER = _str("APP_USER", "admin")
+APP_PASSWORD = _str("APP_PASSWORD")
 
 # ---------- Zalo Bot ----------
 ZALO_BOT_TOKEN = _str("ZALO_BOT_TOKEN")

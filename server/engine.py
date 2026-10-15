@@ -64,6 +64,7 @@ class Engine:
         self.periodic_ai_keys = frozenset()
         self.started_at = time.time()
         self.running = False
+        self.hw_last_change = None  # lần cuối số liệu cảm biến thay đổi -> ESP32 còn gửi
 
     # ------------------------------------------------------------------ setup
     def start(self):
@@ -71,7 +72,12 @@ class Engine:
         since = time.time() - 7200
         for row in self.store.readings_since(since):
             self.recent.append(row)
-        self.analyzer.maybe_train(self.store.readings_since(time.time() - 86400), time.time())
+        history = self.store.readings_since(time.time() - 3 * 86400)
+        self.analyzer.maybe_train([r for r in history if r["ts"] >= time.time() - 86400], time.time())
+        # Lần cuối số liệu cảm biến còn thay đổi (để báo ESP32 mất kết nối từ khi nào, kể cả sau khi khởi động lại)
+        for a, b in zip(history, history[1:]):
+            if any(a.get(k) != b.get(k) for k in SENSOR_KEYS):
+                self.hw_last_change = b["ts"]
         self.running = True
         threading.Thread(target=self._loop, name="engine", daemon=True).start()
         if config.ZALO_COMMANDS_ENABLED and self.zalo.token:
@@ -112,6 +118,9 @@ class Engine:
         values.update({k: 1 if num(data.get(k)) == 1 else 0 for k in DEVICE_KEYS})
         values["MODE"] = MODE_AUTO if num(data.get("MODE")) == MODE_AUTO else 0
         self.store.add_reading(now, values)
+        prev = self.latest_values
+        if prev is not None and any(prev.get(k) != values.get(k) for k in SENSOR_KEYS):
+            self.hw_last_change = now
 
         with self.lock:
             self.latest_data, self.latest_values = data, values
@@ -134,7 +143,7 @@ class Engine:
         # Phân tích + cảnh báo
         with self.lock:
             rows = list(self.recent)
-        analysis = self.analyzer.evaluate(data, rows, now)
+        analysis = self.analyzer.evaluate(data, rows, now, hw_last_change=self.hw_last_change)
         with self.lock:
             self.analysis = analysis
         self._process_findings(analysis["findings"], safety_events, now)
@@ -436,7 +445,8 @@ class Engine:
             important = [f for f in analysis["findings"] if SEV_RANK[f["severity"]] >= 2]
             if important:
                 lines.append("⚠️ " + "; ".join(f["title"] for f in important[:3]))
-            soon = upcoming(analysis.get("forecasts") or {}, 3)
+            offline = any(f["key"] in ("stale_all", "esp_offline") for f in analysis["findings"])
+            soon = [] if offline else upcoming(analysis.get("forecasts") or {}, 3)
             if soon:
                 lines.append("🔮 Dự báo:\n" + "\n".join(f"• {sentence(e['text'])}" for e in soon))
             ai = self._periodic_ai(analysis)
@@ -486,4 +496,8 @@ class Engine:
                 "analysis": self.analysis,
                 "last_ok_ts": self.last_ok_ts,
                 "muted_until": self.mute_until if self.mute_until > time.time() else None,
+                "hardware": {
+                    "last_change_ts": self.hw_last_change,
+                    "esp_ts": (self.latest_data or {}).get("ESP_TS"),
+                },
             }
