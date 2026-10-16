@@ -24,6 +24,16 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 #else
 #error "Thieu file secrets.h: sao chep secrets.example.h thanh secrets.h (cung thu muc voi file .ino) roi dien WiFi"
 #endif
+#if !defined(WIFI_SSID) || !defined(WIFI_PASSWORD)
+#error "secrets.h thieu WIFI_SSID hoac WIFI_PASSWORD"
+#endif
+// secrets.h cu co the chua co 2 dong nay -> mac dinh: khong ghi Google Sheet, Firebase chua khoa
+#ifndef GOOGLE_SCRIPT_URL
+#define GOOGLE_SCRIPT_URL ""
+#endif
+#ifndef FIREBASE_AUTH
+#define FIREBASE_AUTH ""
+#endif
 
 // ================= WIFI =================
 const char* ssid = WIFI_SSID;
@@ -286,6 +296,7 @@ bool sendAllToFirebase() {
 // GOOGLE SHEET
 // =====================================================
 bool sendToGoogleSheet() {
+  if (googleScriptURL.length() == 0) return false;  // chua cai link Google Sheet
   if (WiFi.status() != WL_CONNECTED) return false;
 
   HTTPClient http;
