@@ -51,6 +51,8 @@ def summary_lines(idx):
     if not idx:
         return []
     env, water = idx["environment"], idx["water"]
+    if env["score"] is None:
+        return ["📡 ESP32 mất kết nối — chưa đánh giá được môi trường và nước cấp (số liệu đã cũ)"]
     lines = [
         f"🌿 Môi trường: {env['score']}/100 ({env['label']})",
         f"💧 Nước cấp: {water['label']} ({water['score']}/100)",
@@ -85,6 +87,15 @@ def compute(sensors, findings, data, th):
     if locks:
         water = min(water, 35)
     water_label = "Không đạt" if locks or water < 50 else "Cần theo dõi" if water < 85 else "Đạt"
+
+    if any(f["key"] in ("stale_all", "esp_offline") for f in findings):
+        # Số liệu đã cũ: không chấm điểm trên dữ liệu cũ, không kết luận "khóa" theo số cũ
+        lost = {"score": None, "label": "Mất kết nối"}
+        return {
+            "environment": {**lost, "issues": issues["env"]},
+            "water": {**lost, "issues": issues["water"], "locks": [], "lock_text": None},
+            "overall": lost,
+        }
 
     overall = min(env, water)
     if locks:

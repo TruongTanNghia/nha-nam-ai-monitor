@@ -347,30 +347,36 @@ class Analyzer:
                 "Kiểm tra nguồn điện, WiFi của ESP32 rồi nhấn reset. Nhà nấm đang không được tự động điều khiển.",
             ))
 
+        # ESP32 còn gửi không: dùng mốc "lần cuối số liệu thay đổi" (nhớ qua các lần khởi động lại máy chủ),
+        # chưa có mốc thì xét các bản ghi từ lúc máy chủ chạy. Cùng ngưỡng 5 phút như trên web.
         win10 = _window(rows, now, 600)
-        if win10 and len(win10) >= 20:
-            first = tuple(win10[0].get(k) for k in SENSOR_KEYS)
-            if all(tuple(r.get(k) for k in SENSOR_KEYS) == first for r in win10):
-                since = hw_last_change or win10[0]["ts"]
-                minutes = (now - since) / 60
-                long_ago = f"{minutes / 60:.0f} giờ" if minutes >= 90 else f"{minutes:.0f} phút"
-                findings.append(finding(
-                    "stale_all", "critical" if minutes >= 30 else "warning", "system",
-                    "ESP32 có thể đã mất kết nối",
-                    f"Tất cả chỉ số đứng yên {long_ago}. ESP32 có thể đã mất điện, mất WiFi hoặc bị treo — "
-                    "kiểm tra nguồn, WiFi rồi nhấn reset bo mạch. Trong lúc này nhà nấm không được tự động điều khiển.",
-                ))
-            else:
-                win60 = _window(rows, now, 3600)
-                for key in ("GT_AMDAT", "GT_DOMAN", "GT_PH"):
-                    values = {r.get(key) for r in win60} if win60 else set()
-                    if len(values) == 1 and values != {0}:  # 0 đã có luật riêng / là giá trị hợp lệ
-                        findings.append(finding(
-                            f"stuck_{key}", "info", "sensor",
-                            f"Cảm biến {lname(key)} có thể bị treo",
-                            "Giá trị không đổi suốt 1 giờ trong khi cảm biến khác vẫn thay đổi.",
-                            key,
-                        ))
+        first = tuple(rows[0].get(k) for k in SENSOR_KEYS) if rows else None
+        stale_min, known = None, bool(hw_last_change)
+        if hw_last_change:
+            stale_min = (now - hw_last_change) / 60
+        elif len(rows) >= 2 and all(tuple(r.get(k) for k in SENSOR_KEYS) == first for r in rows):
+            stale_min = (now - rows[0]["ts"]) / 60
+        if stale_min is not None and stale_min >= 5:
+            long_ago = f"{stale_min / 1440:.0f} ngày" if stale_min >= 2880 else (
+                f"{stale_min / 60:.0f} giờ" if stale_min >= 90 else f"{stale_min:.0f} phút")
+            findings.append(finding(
+                "stale_all", "critical" if stale_min >= 30 else "warning", "system",
+                "ESP32 có thể đã mất kết nối",
+                f"Tất cả chỉ số đứng yên {'' if known else 'ít nhất '}{long_ago}. ESP32 có thể đã mất điện, "
+                "mất WiFi hoặc bị treo — kiểm tra nguồn, WiFi rồi nhấn reset bo mạch. "
+                "Trong lúc này nhà nấm không được tự động điều khiển.",
+            ))
+        elif win10 and len(win10) >= 20:  # ESP32 còn gửi: xét từng cảm biến analog có bị treo không
+            win60 = _window(rows, now, 3600)
+            for key in ("GT_AMDAT", "GT_DOMAN", "GT_PH"):
+                values = {r.get(key) for r in win60} if win60 else set()
+                if len(values) == 1 and values != {0}:  # 0 đã có luật riêng / là giá trị hợp lệ
+                    findings.append(finding(
+                        f"stuck_{key}", "info", "sensor",
+                        f"Cảm biến {lname(key)} có thể bị treo",
+                        "Giá trị không đổi suốt 1 giờ trong khi cảm biến khác vẫn thay đổi.",
+                        key,
+                    ))
 
         # 3) Hiệu quả thiết bị
         findings += self._device_checks(data, rows, now, th)

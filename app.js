@@ -190,26 +190,32 @@ function renderSensorTiles(data) {
 /* =========================
    HERO: ĐIỂM SỨC KHỎE + CHIPS
 ========================= */
-const LEVEL_BY_LABEL = { "Đạt": "ok", "Cần theo dõi": "warning", "Không đạt": "critical" };
+const LEVEL_BY_LABEL = { "Đạt": "ok", "Cần theo dõi": "warning", "Không đạt": "critical", "Mất kết nối": "off" };
 
 function drawIndex(sel, score, label, level) {
   const el = $(sel);
   const C = 2 * Math.PI * 52;
-  el.querySelector(".ring-value").style.strokeDasharray = `${(score / 100) * C} ${C}`;
+  const ring = el.querySelector(".ring-value");
+  ring.style.strokeDasharray = `${((score ?? 0) / 100) * C} ${C}`;
+  ring.style.opacity = score === null ? 0 : 1;  // không có điểm: ẩn cả chấm đầu nét
   el.dataset.level = level;
-  el.querySelector("b").textContent = score;
+  el.querySelector("b").textContent = score ?? "—";
   el.querySelector(".health-center span").textContent = label;
 }
 
-const scoreLevel = (score) => (score >= 85 ? "ok" : score >= 65 ? "info" : score >= 40 ? "warning" : "critical");
+const scoreLevel = (score) => (score === null ? "off" : score >= 85 ? "ok" : score >= 65 ? "info" : score >= 40 ? "warning" : "critical");
 
 function renderHero(data) {
   const a = backend.online ? backend.snapshot?.analysis : null;
-  const idx = a?.indices ?? localIndices(data);
+  let idx = a?.indices ?? localIndices(data);
+  if (backend.hardwareOffline) {  // ESP32 mất kết nối: không chấm điểm trên số liệu cũ
+    const lost = { score: null, label: "Mất kết nối", issues: [] };
+    idx = { environment: lost, water: { ...lost, locks: [], lock_text: null } };
+  }
   const env = idx.environment, water = idx.water;
   drawIndex("#idxEnv", env.score, env.label, scoreLevel(env.score));
   drawIndex("#idxWater", water.score, water.label, LEVEL_BY_LABEL[water.label] || "info");
-  $("#envBadge").textContent = `${env.score}/100 · ${env.label}`;
+  $("#envBadge").textContent = env.score === null ? env.label : `${env.score}/100 · ${env.label}`;
   $("#envBadge").dataset.level = scoreLevel(env.score);
   $("#waterBadge").textContent = water.label;
   $("#waterBadge").dataset.level = LEVEL_BY_LABEL[water.label] || "info";

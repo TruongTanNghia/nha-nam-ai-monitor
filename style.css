@@ -211,6 +211,8 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .health[data-level="info"] { --lv: var(--info); }
 .health[data-level="warning"] { --lv: var(--warn); }
 .health[data-level="critical"] { --lv: var(--crit); }
+.health[data-level="off"] { --lv: var(--ink-3); }
+.group-badge[data-level="off"] { background: var(--surface-3); color: var(--ink-3); }
 .health-ring { width: 112px; height: 112px; transform: rotate(-90deg); display: block; }
 .ring-track { fill: none; stroke: var(--surface-3); stroke-width: 10; }
 .ring-value { fill: none; stroke: var(--lv); stroke-width: 10; stroke-linecap: round; stroke-dasharray: 0 400; transition: stroke-dasharray 0.8s cubic-bezier(.2, .8, .2, 1), stroke 0.3s; }
