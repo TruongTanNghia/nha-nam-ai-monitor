@@ -100,4 +100,10 @@ PERIODIC_REPORT_SEC = _int("PERIODIC_REPORT_SEC", 15)  # gửi tình trạng đ�
 PERIODIC_AI_MIN = _float("PERIODIC_AI_MIN", 5)  # nhận định AI trong tin định kỳ viết lại sau N phút
 HISTORY_RETENTION_DAYS = _int("HISTORY_RETENTION_DAYS", 30)
 
+# ---------- Bật sớm theo dự báo (cần firmware có PRE) ----------
+PREDICTIVE_ENABLED = _bool("PREDICTIVE_ENABLED", True)
+PREDICT_LEAD_MIN = _float("PREDICT_LEAD_MIN", 3)      # xin bật khi dự báo còn <= N phút nữa chạm ngưỡng
+PREDICT_MIN_R2 = _float("PREDICT_MIN_R2", 0.5)        # độ tin cậy xu hướng tối thiểu
+PREDICT_MAX_ON_MIN = _float("PREDICT_MAX_ON_MIN", 10)  # bật sớm tối đa N phút nếu vẫn chưa chạm ngưỡng
+
 DB_PATH = SERVER_DIR / "data" / "greenhouse.db"

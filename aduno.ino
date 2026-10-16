@@ -82,6 +82,15 @@ float SET_T = 0;
 // ================= MODE =================
 int MODE = 1;   // 0 = manual, 1 = auto
 
+// ================= BAT SOM THEO DU BAO (may chu AI) =================
+// May chu AI ghi PRE = {BOM, DEN, QUAT, SUONG, MO, SEQ} khi du bao sap cham nguong.
+// AUTO: thiet bi bat khi vuot nguong HOAC co yeu cau bat som; khoa an toan (pH, do man) van uu tien.
+// SEQ tang moi lan may chu ghi; SEQ dung yen qua 60 giay (may chu tat/mat mang) -> bo qua yeu cau.
+int PRE_BOM = 0, PRE_DEN = 0, PRE_QUAT = 0, PRE_SUONG = 0, PRE_MO = 0;
+long preSeq = -1;
+unsigned long preSeenAt = 0;
+const unsigned long PRE_TIMEOUT = 60000;
+
 // ================= OUTPUT =================
 #define DEN_PIN   19
 #define BOM_PIN   2
@@ -199,6 +208,20 @@ bool readSetValues() {
   if (!doc["MO"].isNull())    MO    = doc["MO"].as<int>();
   if (!doc["DONG"].isNull())  DONG  = doc["DONG"].as<int>();
 
+  JsonObject pre = doc["PRE"];
+  if (!pre.isNull()) {
+    long seq = pre["SEQ"] | -1L;
+    if (seq != preSeq) {  // may chu vua ghi yeu cau moi
+      preSeq = seq;
+      preSeenAt = millis();
+    }
+    PRE_BOM   = pre["BOM"]   | 0;
+    PRE_DEN   = pre["DEN"]   | 0;
+    PRE_QUAT  = pre["QUAT"]  | 0;
+    PRE_SUONG = pre["SUONG"] | 0;
+    PRE_MO    = pre["MO"]    | 0;
+  }
+
   return true;
 }
 
@@ -224,6 +247,8 @@ bool sendToFirebase(bool includeDevices) {
   // Nhip tim: Firebase tu dien gio server -> web biet ESP32 con ket noi hay khong
   JsonObject espTs = doc.createNestedObject("ESP_TS");
   espTs[".sv"] = "timestamp";
+  // Bao lai SEQ yeu cau bat som da nhan -> web biet firmware ho tro bat som
+  doc["PRE_ACK"] = preSeq;
 
   if (MODE == 1 || includeDevices) {
     doc["BOM"]   = BOM;
@@ -565,11 +590,14 @@ void manualMode() {
 void autoMode() {
   autoAudioEnabled = true;
 
+  // Yeu cau bat som con hieu luc khi may chu van cap nhat trong 60 giay gan nhat
+  bool pre = preSeq >= 0 && (millis() - preSeenAt) < PRE_TIMEOUT;
+
   // ===== DIEU KHIEN THIET BI =====
-  if (ANHSANG < SET_AS) DEN = 1;
+  if (ANHSANG < SET_AS || (pre && PRE_DEN)) DEN = 1;
   else DEN = 0;
 
-  if (ANHSANG > SET_AS) {
+  if (ANHSANG > SET_AS && !(pre && PRE_MO)) {  // sap toi -> mo man che som
     MO = 0;
     DONG = 1;
   } else {
@@ -577,16 +605,16 @@ void autoMode() {
     DONG = 0;
   }
 
-  if (t > SET_T) QUAT = 1;
+  if (t > SET_T || (pre && PRE_QUAT)) QUAT = 1;
   else QUAT = 0;
 
-  if (h < SET_H) SUONG = 1;
+  if (h < SET_H || (pre && PRE_SUONG)) SUONG = 1;
   else SUONG = 0;
 
   // Yeu cau BOM
   if (GT_DOMAN > SET_DOMAN) {
     BOM = 0;
-  } else if (GT_AMDAT < SET_AMDAT) {
+  } else if (GT_AMDAT < SET_AMDAT || (pre && PRE_BOM)) {
     BOM = 1;
   } else {
     BOM = 0;

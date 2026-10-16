@@ -74,6 +74,9 @@ pH và độ mặn **không trung bình hóa** với nhiệt độ hay ánh sán
 - **Model ML – IsolationForest**: học 24h dữ liệu (tự huấn luyện lại mỗi 30 phút), phát hiện tổ hợp chỉ số bất thường và chỉ ra cảm biến lệch nhiều nhất.
 - **Dự báo thiết bị** (`server/forecast.py`): từ tốc độ thay đổi trong vài phút gần nhất (cần ~1 phút dữ liệu), tính bao lâu nữa chạm ngưỡng và ESP32 sẽ làm gì — vd *“khoảng 4 phút nữa độ ẩm không khí xuống dưới 60% → ESP32 sẽ bật phun sương”*, hoặc khi nào chỉ số trở lại để tắt thiết bị. Hiện trên trang Tổng quan, tab Phân tích, tin Zalo định kỳ và lệnh `/phantich`. Cảm biến chưa cài ngưỡng (giá trị 0) thì chưa dự báo được thiết bị.
 
+### Bật thiết bị sớm theo dự báo (server/preemptive.py)
+Ở chế độ AUTO, khi dự báo còn ≤ `PREDICT_LEAD_MIN` phút (mặc định 3) nữa chỉ số chạm ngưỡng, máy chủ ghi yêu cầu `PRE` lên Firebase để ESP32 **bật sớm** quạt, phun sương, máy bơm, đèn và **mở màn che sớm** khi trời sắp tối. Khóa an toàn của firmware (pH lệch, nước mặn) vẫn thắng; máy chủ tắt/mất mạng thì yêu cầu tự hết hạn sau 60 giây. Bật/tắt bằng công tắc ở tab **Điều khiển**. Cần firmware có hỗ trợ `PRE` — xem [docs/FIRMWARE_CAP_NHAT.md](docs/FIRMWARE_CAP_NHAT.md).
+
 ### Máy chủ AI và chế độ AUTO
 Mặc định máy chủ AI **chỉ giám sát**: khi ESP32 tự bật/tắt thiết bị, máy chủ báo Zalo kèm lý do (vd “BẬT máy bơm — độ ẩm đất 32% < ngưỡng 40%”), tối đa 1 lần / `DEVICE_NOTIFY_MIN` phút mỗi thiết bị, và cảnh báo khi thiết bị bật/tắt liên tục hoặc bơm chạy quá lâu.
 

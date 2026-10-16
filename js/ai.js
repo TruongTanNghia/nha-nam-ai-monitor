@@ -182,11 +182,14 @@ export function renderSoon() {
     return setHTML(el, emptyState("circle-check", "Chưa có thiết bị nào sắp đổi trạng thái",
       "Các chỉ số đang đi ngang hoặc còn xa ngưỡng."));
   }
+  const early = backend.snapshot?.predictive?.active || {};
+  const DEVICE_FOR = { t: "QUAT", h: "SUONG", GT_AMDAT: "BOM", ANHSANG: "DEN" };  // ANHSANG còn mở màn che (MO)
   setHTML(el, events.slice(0, 5).map((e) => `
     <div class="soon ${e.kind}">
       <b class="soon-eta">${e.eta_min !== null ? fmtEta(e.eta_min) : icon("activity")}</b>
       <div>
-        <div class="soon-text">${esc(cap(e.text))}</div>
+        <div class="soon-text">${esc(cap(e.text))}
+          ${e.kind === "trigger" && DEVICE_FOR[e.sensor] in early ? '<span class="tag pre">Đang bật sớm</span>' : ""}</div>
         <small><span class="swatch" style="background:var(${SENSOR_BY_KEY[e.sensor].color})"></span>
           ${esc(SENSOR_BY_KEY[e.sensor].name)} ${fmtWithUnit(e.sensor, fc[e.sensor].now)}
           ${fc[e.sensor].trend !== "flat" ? `· ${rateText(e.sensor, fc[e.sensor].rate_per_min)}` : ""}</small>

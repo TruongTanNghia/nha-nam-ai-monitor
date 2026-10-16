@@ -11,6 +11,7 @@ import indices
 import llm
 from analyzer import SEV_RANK, Analyzer
 from controller import AutoController, explain_auto
+from preemptive import NAMES as PRE_NAMES, Preemptive
 from firebase_client import Firebase
 from forecast import sentence, upcoming
 from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, SENSOR_KEYS, SENSORS, fmt, num, thresholds
@@ -39,6 +40,7 @@ class Engine:
         self.store = Storage()
         self.analyzer = Analyzer()
         self.ctrl = AutoController()
+        self.pre = Preemptive()
         self.zalo = ZaloBot()
         self.outbox = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outbox")
         self.lock = threading.RLock()
@@ -148,6 +150,7 @@ class Engine:
         with self.lock:
             self.analysis = analysis
         self._process_findings(analysis["findings"], safety_events, now)
+        self._predictive(data, analysis, now)
 
         self._housekeeping(now)
 
@@ -192,6 +195,8 @@ class Engine:
                 self.our_writes.pop(dev, None)
                 continue  # do server/Zalo vừa ghi, đã ghi nhận
             reason = explain_auto(dev, values[dev], self.latest_data) if auto else ""
+            if auto and values[dev] == 1 and dev in self.pre.active:
+                reason = "bật sớm theo dự báo AI — " + self.pre.active[dev]["reason"]
             self.store.add_device_event(now, dev, values[dev], source, reason)
             changed.append({"device": dev, "value": values[dev], "reason": reason})
 
@@ -393,6 +398,20 @@ class Engine:
         lines.append("Hiện tại: " + ("; ".join(i["tieu_de"] for i in issues[:3]) if issues else "ổn định ✅"))
         return "\n".join(lines)
 
+    def _predictive(self, data, analysis, now):
+        """Ghi yêu cầu bật sớm (PRE) cho firmware và báo Zalo khi bắt đầu bật sớm."""
+        payload, started, stopped = self.pre.step(data, analysis, now)
+        if payload is not None and not self.fb.update(payload, path="PRE"):
+            return
+        for dev in started:
+            self.store.add_device_event(now, dev, 1, "predict", self.pre.active[dev]["reason"])
+        if started and config.NOTIFY_DEVICE_CHANGES:
+            lines = [f"• {PRE_NAMES[d].capitalize()} — {self.pre.active[d]['reason']}" for d in started]
+            note = "" if data.get("PRE_ACK") is not None else "\n(Firmware chưa hỗ trợ bật sớm — nạp bản aduno.ino mới)"
+            self.notify("🔮 Bật sớm theo dự báo:\n" + "\n".join(lines) + note, important=False)
+        for dev in stopped:
+            log.info("Thôi bật sớm %s", dev)
+
     def _housekeeping(self, now):
         since_train = now - self.analyzer.last_train
         if since_train >= (120 if self.analyzer.model is None else 1800):
@@ -472,6 +491,23 @@ class Engine:
             log.exception("Lỗi gửi báo cáo ngày")
 
     # ------------------------------------------------------------- control API
+    def _verify_write(self, updates, tries=3):
+        """Firmware cũ ghi lại MODE/SET_* mỗi 0.7 giây nên có thể đè mất giá trị vừa ghi:
+        chờ 2.5 giây đọc lại, bị đè thì ghi lại."""
+        if config.DRY_RUN:
+            return True
+        for _ in range(tries):
+            time.sleep(2.5)
+            current = self.fb.get("/")
+            if current is None:
+                continue
+            lost = {k: v for k, v in updates.items() if num(current.get(k)) != num(v)}
+            if not lost:
+                return True
+            log.warning("ESP32 ghi đè %s, ghi lại", list(lost))
+            self.fb.update(lost)
+        return False
+
     def set_devices(self, updates, source="zalo"):
         """Ghi lệnh điều khiển (từ Zalo). Trả (ok, thông báo lỗi)."""
         with self.lock:
@@ -480,6 +516,8 @@ class Engine:
             return False, "Đang ở chế độ AUTO. Gửi /manual để chuyển sang thủ công trước."
         if not self.fb.update(updates):
             return False, "Không ghi được Firebase, thử lại sau."
+        if "MODE" in updates and not self._verify_write(updates):
+            return False, "ESP32 liên tục ghi đè chế độ cũ — cần nạp firmware mới (không ghi SET_* và MODE)."
         now = time.time()
         with self.lock:  # cập nhật ngay, không chờ lần đọc Firebase kế tiếp
             self.latest_data = {**(self.latest_data or {}), **updates}
@@ -501,6 +539,7 @@ class Engine:
                 "analysis": self.analysis,
                 "last_ok_ts": self.last_ok_ts,
                 "muted_until": self.mute_until if self.mute_until > time.time() else None,
+                "predictive": self.pre.status(self.latest_data or {}),
                 "hardware": {
                     "last_change_ts": self.hw_last_change,
                     "esp_ts": (self.latest_data or {}).get("ESP_TS"),

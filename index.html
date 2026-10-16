@@ -61,6 +61,12 @@
 
     <!-- ================= MAIN ================= -->
     <main class="main">
+      <!-- Thanh trên cùng cho điện thoại: luôn thấy trạng thái ESP32 -->
+      <div class="m-appbar">
+        <img src="logo.png" alt="" />
+        <b>Nhà Nấm</b>
+        <span class="m-status" id="mEsp"><span class="dot"></span><span>ESP32</span></span>
+      </div>
       <header class="topbar">
         <div>
           <h1 id="pageTitle">Tổng quan hệ thống</h1>
@@ -148,6 +154,17 @@
 
       <!-- ========== TAB: ĐIỀU KHIỂN ========== -->
       <section id="dieukhien" class="tab-content">
+        <div class="card predict-card" id="predictCard">
+          <div class="predict-head">
+            <span class="device-icon"><i data-lucide="timer"></i></span>
+            <div class="device-text">
+              <div class="device-name">Bật sớm theo dự báo AI</div>
+              <small id="predictDesc">Bật thiết bị trước khi chỉ số chạm ngưỡng, để nhà nấm không bị nóng/khô đột ngột.</small>
+            </div>
+            <button class="switch" role="switch" aria-checked="false" aria-label="Bật sớm theo dự báo AI" id="predictSwitch"><span></span></button>
+          </div>
+          <div class="predict-body" id="predictBody"></div>
+        </div>
         <div class="control-layout">
           <div class="card">
             <div class="card-head">
