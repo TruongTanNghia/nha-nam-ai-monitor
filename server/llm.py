@@ -37,7 +37,8 @@ Cách trả lời:
 
 
 def provider():
-    if not config.LLM_API_KEY and config.LLM_PROVIDER != "openai":
+    local = any(h in config.LLM_BASE_URL for h in ("localhost", "127.0.0.1"))  # vd Ollama, không cần key
+    if not config.LLM_API_KEY and not local:
         return None
     if config.LLM_PROVIDER in ("anthropic", "openai"):
         return config.LLM_PROVIDER

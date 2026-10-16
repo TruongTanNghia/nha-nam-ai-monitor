@@ -26,12 +26,10 @@ ESP32 ──► Firebase RTDB ◄──► Web (index.html)        ← xem & đi
 2. Windows: nhấp đúp **`chay_server.bat`** (hoặc `pip install -r server/requirements.txt` rồi `python server/app.py`).
 3. Mở http://localhost:5000. Điện thoại cùng WiFi: `http://<IP máy tính>:5000`.
 
-### Đưa ra Internet bằng Cloudflare Tunnel (máy tính làm server)
-1. Đặt mật khẩu trong `server/.env`: `APP_USER=admin`, `APP_PASSWORD=...` — **bắt buộc**, có link là ai cũng mở được.
-2. Cài `cloudflared` (`winget install Cloudflare.cloudflared`), nhấp đúp **`chay_cloudflare.bat`**.
-3. Mở link `https://....trycloudflare.com` hiện trong cửa sổ, đăng nhập bằng tài khoản ở bước 1.
+### Cài trên máy khách + đưa ra Internet (Cloudflare Tunnel)
+Nhấp đúp **`CAI_DAT_NHA_NAM.bat`**: tự cài Python, thư viện, `cloudflared`, đặt mật khẩu web, hỏi key Gemini / token Zalo, cho máy chủ chạy ẩn cùng Windows và in ra link `https://….trycloudflare.com`. Link đổi mỗi lần khởi động lại — link mới tự gửi về Zalo, ghi vào `LINK_WEB.txt` và hiện ở tab Cảnh báo. Tắt bằng `DUNG_NHA_NAM.bat`.
 
-Link đổi mỗi lần chạy lại; muốn link cố định cần tài khoản Cloudflare + tên miền (named tunnel). Máy tính phải bật thì server AI mới chạy — ESP32 vẫn tự điều khiển nhà nấm khi máy tắt.
+Chi tiết, cách làm bằng tay và link cố định: [docs/CLOUDFLARE_TUNNEL.md](docs/CLOUDFLARE_TUNNEL.md).
 
 > Không biết chat id? Nhắn `chatid` cho bot sau khi chạy server — bot trả lời ID; tab **Cảnh báo** trên web cũng liệt kê các chat đã nhắn.
 >

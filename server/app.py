@@ -4,11 +4,16 @@ Chạy:  python server/app.py   rồi mở http://localhost:5000
 """
 import hmac
 import logging
+import os
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+if sys.stdout is None:  # chạy ẩn bằng pythonw (không có cửa sổ)
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 for stream in (sys.stdout, sys.stderr):  # console Windows mặc định không in được tiếng Việt/emoji
     if hasattr(stream, "reconfigure"):
         stream.reconfigure(encoding="utf-8", errors="replace")
@@ -18,16 +23,23 @@ from flask import Flask, Response, abort, jsonify, request, send_from_directory 
 import config  # noqa: E402
 import llm  # noqa: E402
 from engine import Engine, now_text  # noqa: E402
+from tunnel import Tunnel  # noqa: E402
 
+_handlers = [logging.StreamHandler()]
+if config.LOG_FILE:  # chạy ẩn (pythonw) không có cửa sổ -> ghi log ra file
+    Path(config.LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
+    _handlers.append(logging.FileHandler(config.LOG_FILE, encoding="utf-8"))
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-7s [%(name)s] %(message)s",
     datefmt="%H:%M:%S",
+    handlers=_handlers,
 )
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 app = Flask(__name__, static_folder=None)
 engine = Engine()
+tunnel = Tunnel(engine)
 
 STATIC_EXT = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".ico", ".webp"}
 BLOCKED_DIRS = {"server", "Nhom5_Intrusion_Warning"}
@@ -92,6 +104,7 @@ def health():
         "zalo": engine.zalo.status(),
         "llm": llm.status(),
         "muted_until": engine.mute_until if engine.mute_until > time.time() else None,
+        "tunnel": tunnel.status(),
     })
 
 
@@ -166,5 +179,6 @@ def mute():
 
 if __name__ == "__main__":
     engine.start()
+    tunnel.start()
     print(f"\n🍄 Máy chủ AI Nhà Nấm: http://localhost:{config.PORT}\n")
     app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)

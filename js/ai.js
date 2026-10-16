@@ -307,7 +307,21 @@ export async function refreshAlerts() {
   } catch { /* giữ dữ liệu cũ */ }
 }
 
+function renderTunnel() {
+  const t = backend.health?.tunnel;
+  const el = $("#tunnelInfo");
+  if (!t?.enabled) return setHTML(el, "");
+  setHTML(el, t.url
+    ? `<div class="tunnel-box ok">${icon("globe")}<div><b>Link công khai (Cloudflare)</b>
+         <a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.url)}</a>
+         <small>Link đổi mỗi lần khởi động lại máy chủ — link mới luôn được gửi về Zalo.</small></div>
+         <button class="btn" type="button" data-copy="${esc(t.url)}">${icon("copy")} Chép</button></div>`
+    : `<div class="tunnel-box warn">${icon("globe")}<div><b>Đang mở đường hầm…</b>
+         <small>${esc(t.error || "Chờ Cloudflare cấp link")}</small></div></div>`);
+}
+
 export function renderZalo() {
+  renderTunnel();
   const z = backend.health?.zalo;
   const tag = $("#zaloTag");
   if (!backend.online || !z) {
@@ -424,6 +438,12 @@ export function bindAIControls() {
     const ok = await connect();
     toast(ok ? `Đã kết nối ${backend.url}` : "Không kết nối được máy chủ", ok ? "ok" : "err");
     document.dispatchEvent(new CustomEvent("backend-changed"));
+  });
+
+  document.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("[data-copy]");
+    if (!btn) return;
+    try { await navigator.clipboard.writeText(btn.dataset.copy); toast("Đã chép link"); } catch { toast("Không chép được", "err"); }
   });
 
   refreshChats();

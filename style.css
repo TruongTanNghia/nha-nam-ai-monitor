@@ -465,6 +465,14 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .inline { display: flex; gap: 8px; }
 .inline input { flex: 1; width: auto; text-align: left; font-weight: 500; }
 
+.tunnel-box { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; margin-bottom: 10px; border-radius: 12px; background: var(--ok-soft); border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent); font-size: 13px; }
+.tunnel-box.warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.tunnel-box > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tunnel-box a { color: var(--ink); font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
+.tunnel-box small { color: var(--ink-3); }
+.tunnel-box svg { color: var(--ok); }
+.tunnel-box.warn svg { color: var(--warn); }
+
 /* ================= TOAST ================= */
 .toast {
   position: fixed; left: 50%; bottom: 28px; z-index: 50; transform: translate(-50%, 20px);

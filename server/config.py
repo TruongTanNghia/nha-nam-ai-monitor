@@ -15,7 +15,9 @@ if load_dotenv:
 
 
 def _str(name, default=""):
-    return os.getenv(name, default).strip()
+    value = os.getenv(name, default).strip()
+    # "KEY=   # chú thích" bị python-dotenv đọc thành giá trị "# chú thích" -> coi như để trống
+    return default if value.startswith("#") else value
 
 
 def _int(name, default):
@@ -53,6 +55,10 @@ PORT = _int("PORT", 5000)
 # Đăng nhập web + API (bắt buộc khi đưa ra Internet qua Cloudflare Tunnel). Để trống = không cần đăng nhập
 APP_USER = _str("APP_USER", "admin")
 APP_PASSWORD = _str("APP_PASSWORD")
+# Cloudflare Tunnel: máy chủ tự mở link công khai https://....trycloudflare.com và gửi link về Zalo
+TUNNEL_ENABLED = _bool("TUNNEL_ENABLED", False)
+CLOUDFLARED_PATH = _str("CLOUDFLARED_PATH")  # để trống = tự tìm
+LOG_FILE = _str("LOG_FILE")  # ghi log ra file (khi chạy ẩn cùng Windows), vd server/data/server.log
 
 # ---------- Zalo Bot ----------
 ZALO_BOT_TOKEN = _str("ZALO_BOT_TOKEN")
