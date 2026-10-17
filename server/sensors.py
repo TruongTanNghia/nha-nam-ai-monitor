@@ -33,6 +33,17 @@ SETTINGS = {
 }
 
 MODE_AUTO = 1
+
+# Lý do ESP32 khởi động lại (firmware gửi ESP_RST)
+RESET_REASONS = {
+    "sut_ap": "sụt áp nguồn (brownout)",
+    "bat_nguon": "mất điện rồi có điện lại",
+    "treo": "bị treo (watchdog)",
+    "loi_phan_mem": "lỗi phần mềm",
+    "khoi_dong_lai": "khởi động lại bằng phần mềm",
+    "nut_reset": "nhấn nút reset",
+    "khac": "không rõ",
+}
 MODE_MANUAL = 0
 
 

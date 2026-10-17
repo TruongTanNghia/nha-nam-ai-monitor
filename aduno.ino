@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include "DHT.h"
 #include <HardwareSerial.h>
+#include <esp_system.h>
 
 #define softwareSerial         Serial2
 #define MCU_SIM_BAUDRATE       9600
@@ -152,24 +153,73 @@ unsigned long timeSheet    = 0;
 
 const unsigned long SHEET_INTERVAL    = 60000;
 const unsigned long SENSOR_INTERVAL   = 500;
-const unsigned long SET_READ_INTERVAL = 1000;
-const unsigned long FIREBASE_INTERVAL = 700;
+// Moi lan goi Firebase (HTTPS) mat ~0.5-1 giay: gui/doc 2 giay/lan de vong lap con thoi gian
+// doc cam bien va dieu khien (truoc day 0.7s/1s -> ESP32 gan nhu luon ban mang).
+const unsigned long SET_READ_INTERVAL = 2000;
+const unsigned long FIREBASE_INTERVAL = 2000;
+const unsigned long WIFI_RETRY_MS     = 15000;  // mat WiFi: thu ket noi lai moi 15 giay, KHONG dung ca he thong
+unsigned long lastWiFiTry = 0;
+
+// ================= ON DINH RO-LE (che do AUTO) =================
+// Vung tre: bat khi vuot nguong, chi tat khi da qua nguong + vung tre -> khong dong ngat lien tuc.
+const float HYST_T     = 0.5;   // do C
+const float HYST_H     = 2;     // % do am khong khi
+const float HYST_SOIL  = 2;     // % do am dat
+const float HYST_LIGHT = 50;    // lux
+// Moi ro-le doi trang thai toi da 1 lan / 15 giay; 2 thiet bi bat cach nhau >= 0.8 giay
+// (dong khoi dong cua bom/quat/phun suong cung luc de gay sut ap, reset ESP32).
+const unsigned long MIN_SWITCH_MS = 15000;
+const unsigned long INRUSH_GAP_MS = 800;
+enum { O_DEN, O_BOM, O_SUONG, O_QUAT, O_MO, O_DONG, O_COUNT };
+unsigned long lastSwitchAt[O_COUNT] = {0};
+unsigned long lastTurnOnAt = 0;
 const unsigned long LCD_INTERVAL      = 1000;
 
 // =====================================================
 // WIFI
 // =====================================================
-void connectWiFi() {
+// Ket noi WiFi KHONG chan: mat WiFi (modem mat dien, song yeu) thi ESP32 van doc cam bien,
+// van dieu khien AUTO theo nguong da luu va hien LCD; chi thu ket noi lai moi WIFI_RETRY_MS.
+void startWiFi(unsigned long waitMs) {
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, password);
+  lastWiFiTry = millis();
   Serial.print("Dang ket noi WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
+  while (WiFi.status() != WL_CONNECTED && millis() - lastWiFiTry < waitMs) {
     delay(300);
     Serial.print(".");
   }
   Serial.println();
-  Serial.println("WiFi da ket noi");
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("WiFi da ket noi, IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("Chua co WiFi - van chay offline, se thu lai sau");
+  }
+}
+
+void maintainWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  if (millis() - lastWiFiTry < WIFI_RETRY_MS) return;
+  lastWiFiTry = millis();
+  Serial.println("Mat WiFi - thu ket noi lai");
+  WiFi.disconnect();
+  WiFi.begin(ssid, password);
+}
+
+const char* resetReasonText() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "bat_nguon";
+    case ESP_RST_BROWNOUT: return "sut_ap";
+    case ESP_RST_PANIC:    return "loi_phan_mem";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return "treo";
+    case ESP_RST_SW:       return "khoi_dong_lai";
+    case ESP_RST_EXT:      return "nut_reset";
+    default:               return "khac";
+  }
 }
 
 // =====================================================
@@ -182,6 +232,7 @@ bool readSetValues() {
   String url = firebaseURL();
 
   http.begin(url);
+  http.setConnectTimeout(3000);
   http.setTimeout(2000);
 
   int httpCode = http.GET();
@@ -211,12 +262,15 @@ bool readSetValues() {
   if (!doc["SET_T"].isNull())      SET_T      = doc["SET_T"].as<float>();
   if (!doc["MODE"].isNull())       MODE       = doc["MODE"].as<int>();
 
+  // Lenh bat/tat thiet bi tu web/Zalo chi dung o MANUAL; o AUTO ESP32 tu quyet (giu dung trang thai ro-le)
+  if (MODE == 0) {
   if (!doc["DEN"].isNull())   DEN   = doc["DEN"].as<int>();
   if (!doc["BOM"].isNull())   BOM   = doc["BOM"].as<int>();
   if (!doc["SUONG"].isNull()) SUONG = doc["SUONG"].as<int>();
   if (!doc["QUAT"].isNull())  QUAT  = doc["QUAT"].as<int>();
   if (!doc["MO"].isNull())    MO    = doc["MO"].as<int>();
   if (!doc["DONG"].isNull())  DONG  = doc["DONG"].as<int>();
+  }
 
   JsonObject pre = doc["PRE"];
   if (!pre.isNull()) {
@@ -259,6 +313,10 @@ bool sendToFirebase(bool includeDevices) {
   espTs[".sv"] = "timestamp";
   // Bao lai SEQ yeu cau bat som da nhan -> web biet firmware ho tro bat som
   doc["PRE_ACK"] = preSeq;
+  // Chan doan: thoi gian chay (giay), ly do khoi dong lan truoc (vd sut_ap), song WiFi (dBm)
+  doc["ESP_UP"]   = millis() / 1000;
+  doc["ESP_RST"]  = resetReasonText();
+  doc["ESP_RSSI"] = WiFi.RSSI();
 
   if (MODE == 1 || includeDevices) {
     doc["BOM"]   = BOM;
@@ -274,7 +332,8 @@ bool sendToFirebase(bool includeDevices) {
 
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(1500);
+  http.setConnectTimeout(3000);
+  http.setTimeout(2000);
 
   int httpCode = http.PATCH(json);
   http.end();
@@ -312,7 +371,8 @@ bool sendToGoogleSheet() {
 
   http.begin(url);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setTimeout(8000);
+  http.setConnectTimeout(3000);
+  http.setTimeout(5000);
 
   int httpCode = http.GET();
   String payload = "";
@@ -354,6 +414,17 @@ int getMedianNum(int bArray[], int iFilterLen) {
   return (bTab[iFilterLen / 2] + bTab[iFilterLen / 2 - 1]) / 2;
 }
 
+// Doc analog 9 lan lay trung vi: nguon nhieu/sut ap lam ADC nhay, trung vi loai bo gai nhieu
+int analogReadMedian(int pin) {
+  const int N = 9;
+  int samples[N];
+  for (int i = 0; i < N; i++) {
+    samples[i] = analogRead(pin);
+    delayMicroseconds(300);
+  }
+  return getMedianNum(samples, N);
+}
+
 // =====================================================
 // DOC CAM BIEN
 // =====================================================
@@ -367,7 +438,7 @@ void readSensors() {
     t = (float)tt;
   }
 
-  int measure = analogRead(PH_PIN);
+  int measure = analogReadMedian(PH_PIN);
   float voltage = 3.3 / 4095.0 * measure;
   GT_PH = 8 + ((2.5 - voltage) / 0.38);
 
@@ -388,7 +459,7 @@ void readSensors() {
     if (GT_DOMAN< 0) GT_DOMAN = 0;
 
   ////////////////////
-      int rawSoil = analogRead(CBAMDAT);
+      int rawSoil = analogReadMedian(CBAMDAT);
     soilRaw = rawSoil;
     GT_AMDAT = map(rawSoil, 4096, 0, 0, 100);
     GT_AMDAT = GT_AMDAT * 100 / 20;
@@ -598,51 +669,65 @@ void manualMode() {
 // =====================================================
 // AUTO MODE
 // =====================================================
+// Doi 1 dau ra o AUTO. force = true (khoa an toan pH/do man): tat ngay, bo qua gioi han.
+bool setOutput(int idx, int pin, int &state, int want, bool force) {
+  if (want == state) return false;
+  unsigned long now = millis();
+  if (!force) {
+    if (lastSwitchAt[idx] != 0 && now - lastSwitchAt[idx] < MIN_SWITCH_MS) return false;
+    if (want == 1 && now - lastTurnOnAt < INRUSH_GAP_MS) return false;
+  }
+  state = want;
+  digitalWrite(pin, state);
+  lastSwitchAt[idx] = now;
+  if (want == 1) lastTurnOnAt = now;
+  return true;
+}
+
 void autoMode() {
   autoAudioEnabled = true;
 
   // Yeu cau bat som con hieu luc khi may chu van cap nhat trong 60 giay gan nhat
   bool pre = preSeq >= 0 && (millis() - preSeenAt) < PRE_TIMEOUT;
 
-  // ===== DIEU KHIEN THIET BI =====
-  if (ANHSANG < SET_AS || (pre && PRE_DEN)) DEN = 1;
-  else DEN = 0;
+  // ===== DIEU KHIEN THIET BI (co vung tre: giua 2 muc thi giu nguyen trang thai) =====
+  int wantDEN = DEN;
+  if (ANHSANG < SET_AS || (pre && PRE_DEN)) wantDEN = 1;
+  else if (ANHSANG > SET_AS + HYST_LIGHT) wantDEN = 0;
 
-  if (ANHSANG > SET_AS && !(pre && PRE_MO)) {  // sap toi -> mo man che som
-    MO = 0;
-    DONG = 1;
-  } else {
-    MO = 1;
-    DONG = 0;
+  int wantMO = MO;
+  if (ANHSANG <= SET_AS || (pre && PRE_MO)) wantMO = 1;  // toi / sap toi -> mo man che
+  else if (ANHSANG > SET_AS + HYST_LIGHT) wantMO = 0;
+
+  int wantQUAT = QUAT;
+  if (t > SET_T || (pre && PRE_QUAT)) wantQUAT = 1;
+  else if (t < SET_T - HYST_T) wantQUAT = 0;
+
+  int wantSUONG = SUONG;
+  if (h < SET_H || (pre && PRE_SUONG)) wantSUONG = 1;
+  else if (h >= min(SET_H + HYST_H, 100.0f)) wantSUONG = 0;
+
+  int wantBOM = BOM;
+  if (GT_AMDAT < SET_AMDAT || (pre && PRE_BOM)) wantBOM = 1;
+  else if (GT_AMDAT >= min(SET_AMDAT + HYST_SOIL, 100.0f)) wantBOM = 0;
+
+  // Khoa an toan: nuoc man -> khong bom; pH ngoai nguong -> khong bom, khong phun suong (tat ngay)
+  bool lockBOM   = (GT_DOMAN > SET_DOMAN) || (GT_PH < SET_PHLOW) || (GT_PH > SET_PHHIGH);
+  bool lockSUONG = (GT_PH < SET_PHLOW) || (GT_PH > SET_PHHIGH);
+  if (lockBOM) wantBOM = 0;
+  if (lockSUONG) wantSUONG = 0;
+
+  setOutput(O_BOM, BOM_PIN, BOM, wantBOM, lockBOM);
+  setOutput(O_SUONG, SUONG_PIN, SUONG, wantSUONG, lockSUONG);
+  setOutput(O_QUAT, QUAT_PIN, QUAT, wantQUAT, false);
+  setOutput(O_DEN, DEN_PIN, DEN, wantDEN, false);
+  // Man che: MO va DONG luon nguoc nhau, doi cung luc
+  setOutput(O_MO, MO_PIN, MO, wantMO, false);
+  if (DONG != 1 - MO) {  // ke ca luc vua khoi dong (MO = DONG = 1): khong bao gio cho mo + dong cung luc
+    DONG = 1 - MO;
+    digitalWrite(DONG_PIN, DONG);
+    lastSwitchAt[O_DONG] = millis();
   }
-
-  if (t > SET_T || (pre && PRE_QUAT)) QUAT = 1;
-  else QUAT = 0;
-
-  if (h < SET_H || (pre && PRE_SUONG)) SUONG = 1;
-  else SUONG = 0;
-
-  // Yeu cau BOM
-  if (GT_DOMAN > SET_DOMAN) {
-    BOM = 0;
-  } else if (GT_AMDAT < SET_AMDAT || (pre && PRE_BOM)) {
-    BOM = 1;
-  } else {
-    BOM = 0;
-  }
-
-  // pH ngoai nguong thi ep BOM = 0 va SUONG = 0
-  if ((GT_PH < SET_PHLOW) || (GT_PH > SET_PHHIGH)) {
-    BOM = 0;
-    SUONG = 0;
-  }
-
-  digitalWrite(DEN_PIN, DEN);
-  digitalWrite(BOM_PIN, BOM);
-  digitalWrite(SUONG_PIN, SUONG);
-  digitalWrite(QUAT_PIN, QUAT);
-  digitalWrite(MO_PIN, MO);
-  digitalWrite(DONG_PIN, DONG);
 
   // ===== THEM AM THANH VAO HANG DOI - CHI 1 LAN KHI MOI THOA =====
   bool nowDEN   = (DEN == 1);
@@ -771,7 +856,23 @@ void updateLCD() {
 void setup() {
   Serial.begin(115200);
 
-  connectWiFi();
+  // Cai chan ro-le NGAY khi khoi dong (truoc day doi WiFi + phat nhac 3 giay roi moi cai
+  // -> ro-le tha noi, nhay lung tung moi lan ESP32 khoi dong lai do sut dien)
+  pinMode(DEN_PIN, OUTPUT);
+  pinMode(BOM_PIN, OUTPUT);
+  pinMode(SUONG_PIN, OUTPUT);
+  pinMode(QUAT_PIN, OUTPUT);
+  pinMode(MO_PIN, OUTPUT);
+  pinMode(DONG_PIN, OUTPUT);
+  digitalWrite(DEN_PIN, LOW);
+  digitalWrite(BOM_PIN, LOW);
+  digitalWrite(SUONG_PIN, LOW);
+  digitalWrite(QUAT_PIN, LOW);
+  digitalWrite(MO_PIN, HIGH);
+  digitalWrite(DONG_PIN, HIGH);
+
+  Serial.print("Ly do khoi dong: ");
+  Serial.println(resetReasonText());
 
   Wire.begin();
   sensor.begin(ModeContinuous, ResolutionHigh);
@@ -803,19 +904,11 @@ void setup() {
   pinMode(CBDOMAN, INPUT);
   pinMode(PH_PIN, INPUT);
 
-  pinMode(DEN_PIN, OUTPUT);
-  pinMode(BOM_PIN, OUTPUT);
-  pinMode(SUONG_PIN, OUTPUT);
-  pinMode(QUAT_PIN, OUTPUT);
-  pinMode(MO_PIN, OUTPUT);
-  pinMode(DONG_PIN, OUTPUT);
-
-  digitalWrite(DEN_PIN, LOW);
-  digitalWrite(BOM_PIN, LOW);
-  digitalWrite(SUONG_PIN, LOW);
-  digitalWrite(QUAT_PIN, LOW);
-  digitalWrite(MO_PIN, HIGH);
-  digitalWrite(DONG_PIN, HIGH);
+  // WiFi: cho toi da 10 giay, khong co van chay offline (AUTO theo nguong da luu)
+  lcd.setCursor(0, 0);
+  lcd.print("Dang ket noi WiFi...");
+  startWiFi(10000);
+  lcd.clear();
 
   lastDEN   = digitalRead(DEN_PIN);
   lastBOM   = digitalRead(BOM_PIN);
@@ -836,9 +929,7 @@ void loop() {
   updateDFPlayerState();
   processAutoAudioQueue();
 
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
-  }
+  maintainWiFi();  // khong chan: mat WiFi van doc cam bien + dieu khien AUTO
 
   unsigned long now = millis();
 

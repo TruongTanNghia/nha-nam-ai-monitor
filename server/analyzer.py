@@ -264,7 +264,7 @@ class Analyzer:
         return out, findings
 
     # ---------------------------------------------------------- Main entry
-    def evaluate(self, data, rows, now=None, hw_last_change=None):
+    def evaluate(self, data, rows, now=None, hw_last_change=None, hw_info=None):
         """data: bản ghi Firebase mới nhất; rows: lịch sử gần đây (cũ -> mới, đã gồm bản mới nhất)."""
         now = now or time.time()
         th = thresholds(data)
@@ -335,6 +335,29 @@ class Analyzer:
                 "Giá trị bằng 0 suốt 5 phút — cảm biến có thể chưa cắm, đứt dây, nằm ngoài đất hoặc chưa hiệu chuẩn. "
                 "Ở chế độ AUTO, máy bơm sẽ bật liên tục theo số liệu này.",
                 "GT_AMDAT",
+            ))
+
+        # Nguồn điện / WiFi của ESP32 (firmware gửi ESP_UP, ESP_RST, ESP_RSSI)
+        hw = hw_info or {}
+        if hw.get("restarts_1h", 0) >= 2:
+            findings.append(finding(
+                "power_unstable", "critical" if hw["restarts_1h"] >= 3 else "warning", "system",
+                "Nguồn điện không ổn định",
+                f"ESP32 khởi động lại {hw['restarts_1h']} lần trong 1 giờ (gần nhất: {hw.get('last_restart_reason')}). "
+                "Kiểm tra bộ nguồn cấp cho ESP32, tách nguồn rơ-le/bơm/quạt khỏi nguồn ESP32, siết lại dây nguồn.",
+            ))
+        elif hw.get("last_restart_ts") and now - hw["last_restart_ts"] < 1800 and \
+                hw.get("last_restart_reason") == "sụt áp nguồn (brownout)":
+            findings.append(finding(
+                "power_brownout", "warning", "system", "ESP32 vừa reset do sụt áp",
+                "Điện áp cấp cho bo mạch bị tụt (thường khi bơm/quạt/phun sương khởi động). "
+                "Nên dùng nguồn riêng cho ESP32 và thêm tụ lọc gần bo.",
+            ))
+        rssi = hw.get("rssi")
+        if rssi is not None and rssi < -80:
+            findings.append(finding(
+                "wifi_weak", "warning", "system", "Sóng WiFi yếu",
+                f"ESP32 bắt WiFi {rssi:.0f} dBm (yếu). Dễ mất kết nối — dời modem/bộ kích sóng gần nhà nấm hơn.",
             ))
 
         # Nhịp tim ESP32 (firmware ghi ESP_TS = giờ Firebase mỗi lần gửi): chính xác hơn việc đoán số liệu đứng yên

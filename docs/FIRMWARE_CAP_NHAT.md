@@ -1,5 +1,7 @@
 # Cập nhật firmware ESP32 cho khớp web / máy chủ AI
 
+> **Cách đơn giản nhất:** chép đè toàn bộ `aduno.ino` mới nhất vào file `.ino` đang dùng (giữ `secrets.h` cùng thư mục). Bản mới đã gồm mọi mục dưới đây **và** các sửa cho nguồn/WiFi chập chờn: mất WiFi vẫn chạy AUTO, rơ-le được cài ngay khi khởi động, vùng trễ + chống rơ-le đóng ngắt liên tục, bật thiết bị lệch nhau để tránh sụt áp, đọc pH/độ ẩm đất nhiều mẫu, báo lý do khởi động lại và sóng WiFi. Phần cứng: xem [PHAN_CUNG_ON_DINH.md](PHAN_CUNG_ON_DINH.md).
+
 `aduno.ino` trong repo đã có sẵn mọi thay đổi dưới đây. Nếu bo đang chạy file khác (vd `Codenhanam2026_amthanh.ino`), sửa 4 chỗ sau rồi nạp lại.
 
 ## 1. Không ghi đè ngưỡng và chế độ (sửa lỗi "bấm Lưu cài đặt là mất")

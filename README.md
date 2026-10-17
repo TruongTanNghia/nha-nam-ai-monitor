@@ -48,6 +48,8 @@ ESP32 đọc cảm biến (DHT11, BH1750, độ ẩm đất, độ mặn TDS, pH
 **Chế độ AUTO do ESP32 tự điều khiển**: đèn bật khi ánh sáng < `SET_AS`; màn che MỞ khi ánh sáng ≤ `SET_AS`, ĐÓNG khi sáng hơn; quạt bật khi nhiệt độ > `SET_T`; phun sương bật khi độ ẩm < `SET_H`; bơm bật khi độ ẩm đất < `SET_AMDAT`. Bơm bị ngắt khi độ mặn > `SET_DOMAN`; bơm và phun sương bị ngắt khi pH ngoài `SET_PHLOW`–`SET_PHHIGH`.
 **MANUAL**: web/Zalo ghi lệnh lên Firebase, ESP32 thực thi trong ~1 giây.
 
+Nguồn điện / WiFi chập chờn, ESP32 hay khởi động lại: xem [docs/PHAN_CUNG_ON_DINH.md](docs/PHAN_CUNG_ON_DINH.md) (web tab Cảnh báo có thẻ **Nguồn & WiFi ESP32**).
+
 Nạp firmware: sao chép `secrets.example.h` thành `secrets.h` (cùng thư mục với `aduno.ino`), điền WiFi, link Google Apps Script và Firebase secret (nếu đã khóa rules). `secrets.h` không được đưa lên Git.
 
 ## Chức năng

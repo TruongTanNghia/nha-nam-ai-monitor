@@ -7,7 +7,7 @@ const SEV_TEXT = { critical: "Nghiêm trọng", warning: "Cảnh báo", info: "G
 const SEV_ICON = { critical: "octagon-alert", warning: "triangle-alert", info: "info" };
 const CAT_TEXT = { threshold: "Ngưỡng", sensor: "Cảm biến", device: "Thiết bị", ml: "Model ML", forecast: "Dự báo", system: "Hệ thống", water: "Nước cấp" };
 const DEVICE_NAME = { BOM: "Máy bơm", DEN: "Đèn", QUAT: "Quạt", SUONG: "Phun sương", MO: "Màn che (mở)", DONG: "Màn che (đóng)", MODE: "Chế độ" };
-const SOURCE_TEXT = { auto: "Máy chủ AI", esp_auto: "ESP32 tự động", zalo: "Zalo", external: "Web" };
+const SOURCE_TEXT = { auto: "Máy chủ AI", esp_auto: "ESP32 tự động", zalo: "Zalo", external: "Web", predict: "Bật sớm theo dự báo", esp: "Lý do" };
 
 export const backend = {
   url: null,
@@ -144,6 +144,7 @@ export function renderAnalysis() {
 
   renderForecast(a);
   renderSoon();
+  renderHardwareInfo();
   renderML(a);
 
   const llm = backend.health?.llm;
@@ -257,13 +258,44 @@ function renderML(a) {
     <p class="note">${esc(ml.note || "")}</p>`);
 }
 
+function fmtDuration(sec) {
+  if (sec === null || sec === undefined) return "—";
+  if (sec < 120) return `${Math.round(sec)} giây`;
+  if (sec < 7200) return `${Math.round(sec / 60)} phút`;
+  if (sec < 172800) return `${Math.round(sec / 3600)} giờ`;
+  return `${Math.round(sec / 86400)} ngày`;
+}
+
+/** Thẻ "Nguồn & WiFi ESP32": phát hiện nguồn không ổn định qua số lần khởi động lại + lý do */
+function renderHardwareInfo() {
+  const hw = backend.snapshot?.hardware;
+  const box = $("#hwInfo");
+  if (!backend.online || !hw) return setHTML(box, `<div><dt>Trạng thái</dt><dd>Cần Máy chủ AI</dd></div>`);
+  if (hw.uptime_sec === null || hw.uptime_sec === undefined) {
+    setHTML(box, `<div><dt>Firmware</dt><dd>Chưa gửi thông tin nguồn</dd></div>`);
+    $("#hwNote").textContent = "Nạp firmware aduno.ino mới để xem ESP32 có hay khởi động lại vì sụt áp không, và sóng WiFi mạnh/yếu.";
+    return;
+  }
+  const rssi = hw.rssi;
+  const rssiText = rssi === null ? "—" : `${rssi} dBm · ${rssi >= -60 ? "mạnh" : rssi >= -72 ? "khá" : rssi >= -80 ? "yếu" : "rất yếu"}`;
+  setHTML(box, `
+    <div><dt>Chạy liên tục</dt><dd>${fmtDuration(hw.uptime_sec)}</dd></div>
+    <div><dt>Khởi động lại 24h</dt><dd>${hw.restarts_24h} lần${hw.restarts_1h ? ` (${hw.restarts_1h} trong 1 giờ)` : ""}</dd></div>
+    <div><dt>Lý do lần khởi động gần nhất</dt><dd>${esc(hw.reset_reason || "—")}</dd></div>
+    <div><dt>Sóng WiFi</dt><dd>${esc(rssiText)}</dd></div>`);
+  $("#hwNote").textContent = hw.restarts_1h >= 2 || hw.reset_reason === "sụt áp nguồn (brownout)"
+    ? "Nguồn điện chưa ổn định — xem docs/PHAN_CUNG_ON_DINH.md để tách nguồn rơ-le và thêm tụ lọc."
+    : "";
+}
+
 export function renderEvents(events) {
   const el = $("#eventList");
   if (!backend.online) return setHTML(el, offlineHTML());
   if (!events?.length) return setHTML(el, emptyState("history", "Chưa có hoạt động", "Các lần bật/tắt thiết bị sẽ hiện ở đây."));
   setHTML(el, events.slice(0, 8).map((e) => {
     const on = Number(e.value) === 1;
-    const what = e.device === "MODE" ? `Chế độ ${on ? "AUTO" : "MANUAL"}` : `${on ? "Bật" : "Tắt"} ${DEVICE_NAME[e.device] || e.device}`;
+    const what = e.device === "ESP_RESTART" ? "ESP32 khởi động lại"
+      : e.device === "MODE" ? `Chế độ ${on ? "AUTO" : "MANUAL"}` : `${on ? "Bật" : "Tắt"} ${DEVICE_NAME[e.device] || e.device}`;
     return `
       <div class="event">
         <span class="event-dot ${on ? "on" : ""}"></span>

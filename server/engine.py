@@ -14,7 +14,7 @@ from controller import AutoController, explain_auto
 from preemptive import NAMES as PRE_NAMES, Preemptive
 from firebase_client import Firebase
 from forecast import sentence, upcoming
-from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, SENSOR_KEYS, SENSORS, fmt, num, thresholds
+from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, RESET_REASONS, SENSOR_KEYS, SENSORS, fmt, num, thresholds
 from storage import Storage
 from zalo_bot import ZaloBot
 
@@ -67,7 +67,8 @@ class Engine:
         self.periodic_ai_keys = frozenset()
         self.started_at = time.time()
         self.running = False
-        self.hw_last_change = None  # lần cuối số liệu cảm biến thay đổi -> ESP32 còn gửi
+        self.hw_last_change = None
+        self.esp_up_prev = None  # ESP_UP lần đọc trước, để phát hiện ESP32 khởi động lại  # lần cuối số liệu cảm biến thay đổi -> ESP32 còn gửi
 
     # ------------------------------------------------------------------ setup
     def start(self):
@@ -124,6 +125,7 @@ class Engine:
         prev = self.latest_values
         if prev is not None and any(prev.get(k) != values.get(k) for k in SENSOR_KEYS):
             self.hw_last_change = now
+        self._track_esp_restart(data, now)
 
         with self.lock:
             self.latest_data, self.latest_values = data, values
@@ -146,7 +148,8 @@ class Engine:
         # Phân tích + cảnh báo
         with self.lock:
             rows = list(self.recent)
-        analysis = self.analyzer.evaluate(data, rows, now, hw_last_change=self.hw_last_change)
+        analysis = self.analyzer.evaluate(data, rows, now, hw_last_change=self.hw_last_change,
+                                          hw_info=self.hardware_info(data, now))
         with self.lock:
             self.analysis = analysis
         self._process_findings(analysis["findings"], safety_events, now)
@@ -398,6 +401,35 @@ class Engine:
         lines.append("Hiện tại: " + ("; ".join(i["tieu_de"] for i in issues[:3]) if issues else "ổn định ✅"))
         return "\n".join(lines)
 
+    def _track_esp_restart(self, data, now):
+        """ESP_UP (giây chạy liên tục) giảm -> ESP32 vừa khởi động lại; ghi lại kèm lý do."""
+        up = num(data.get("ESP_UP"))
+        if up is None:
+            return
+        prev, self.esp_up_prev = self.esp_up_prev, up
+        if prev is None or up >= prev:
+            return
+        reason = RESET_REASONS.get(data.get("ESP_RST"), "không rõ")
+        self.store.add_device_event(now, "ESP_RESTART", 1, "esp", reason)
+        log.warning("ESP32 khởi động lại: %s", reason)
+        if data.get("ESP_RST") in ("sut_ap", "bat_nguon", "treo"):
+            self.notify(f"🔌 ESP32 vừa khởi động lại — lý do: {reason}.\n"
+                        "Nếu lặp lại nhiều lần: kiểm tra nguồn điện cấp cho bo mạch và rơ-le.")
+
+    def hardware_info(self, data, now):
+        """Thông tin nguồn/WiFi của ESP32 (cần firmware gửi ESP_UP, ESP_RST, ESP_RSSI)."""
+        restarts = [e for e in self.store.device_events(200)
+                    if e["device"] == "ESP_RESTART" and e["ts"] >= now - 86400]
+        return {
+            "uptime_sec": num(data.get("ESP_UP")),
+            "reset_reason": RESET_REASONS.get(data.get("ESP_RST")) if data.get("ESP_RST") else None,
+            "rssi": num(data.get("ESP_RSSI")),
+            "restarts_1h": sum(1 for e in restarts if e["ts"] >= now - 3600),
+            "restarts_24h": len(restarts),
+            "last_restart_ts": restarts[0]["ts"] if restarts else None,
+            "last_restart_reason": restarts[0]["reason"] if restarts else None,
+        }
+
     def _predictive(self, data, analysis, now):
         """Ghi yêu cầu bật sớm (PRE) cho firmware và báo Zalo khi bắt đầu bật sớm."""
         payload, started, stopped = self.pre.step(data, analysis, now)
@@ -543,5 +575,6 @@ class Engine:
                 "hardware": {
                     "last_change_ts": self.hw_last_change,
                     "esp_ts": (self.latest_data or {}).get("ESP_TS"),
+                    **self.hardware_info(self.latest_data or {}, time.time()),
                 },
             }
