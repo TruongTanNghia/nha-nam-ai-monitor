@@ -137,7 +137,7 @@ def report():
     text, by_ai = engine.build_report(hours)
     sent = False
     if body.get("send_zalo"):
-        sent = engine.zalo.send(f"{text}\n🕒 {now_text()}")
+        sent = engine.zalo.send(f"{text}\n🕒 {now_text()}", priority="high")
     return jsonify({"text": text, "by_ai": by_ai, "sent_zalo": sent})
 
 
@@ -159,7 +159,8 @@ def ask():
 def zalo_test():
     ok = engine.zalo.send(
         "👋 Xin chào! Đây là tin nhắn thử từ Máy chủ AI Nhà Nấm.\n"
-        f"{engine.readings_line()}\nGõ /help để xem các lệnh.\n🕒 {now_text()}"
+        f"{engine.readings_line()}\nGõ /help để xem các lệnh.\n🕒 {now_text()}",
+        priority="high",
     )
     return jsonify({"ok": ok, "error": engine.zalo.last_error, "status": engine.zalo.status()})
 

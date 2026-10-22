@@ -54,7 +54,7 @@ class CommandHandler:
                     self.zalo.send("⚠️ Có lỗi khi xử lý lệnh, thử lại sau.", [msg["chat_id"]])
 
     def reply(self, chat_id, text):
-        self.zalo.send(text, [chat_id])
+        self.zalo.send(text, [chat_id], priority="high")
 
     def handle(self, chat_id, text):
         cmd = normalize(text)

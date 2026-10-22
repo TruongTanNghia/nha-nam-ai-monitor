@@ -5,6 +5,7 @@ Tài liệu: https://bot.zapps.me/docs — API giống Telegram Bot API.
 import logging
 import threading
 import time
+from collections import deque
 
 import requests
 
@@ -40,6 +41,9 @@ class ZaloBot:
         self.seen_chats = {}  # chat_id -> {name, last_text, ts} để hỗ trợ lấy chat_id
         self.last_error = None
         self.sent_count = 0
+        self.sent_times = deque()   # thời điểm các tin đã gửi trong 24 giờ
+        self.dropped = 0            # số tin bỏ qua vì sắp hết hạn mức
+        self.paused_until = 0       # Zalo báo vượt hạn mức -> ngừng gửi tới lúc này
 
     @property
     def configured(self):
@@ -56,13 +60,42 @@ class ZaloBot:
             "commands": config.ZALO_COMMANDS_ENABLED,
             "sent_count": self.sent_count,
             "last_error": self.last_error,
+            "sent_hour": self._count(3600),
+            "sent_day": self._count(86400),
+            "max_hour": config.ZALO_MAX_PER_HOUR,
+            "max_day": config.ZALO_MAX_PER_DAY,
+            "dropped": self.dropped,
+            "paused_until": self.paused_until if self.paused_until > time.time() else None,
         }
 
-    def send(self, text, chat_ids=None):
+    def _count(self, seconds):
+        now = time.time()
+        while self.sent_times and self.sent_times[0] < now - 86400:
+            self.sent_times.popleft()
+        return sum(1 for t in self.sent_times if t >= now - seconds)
+
+    def _allowed(self, priority):
+        """low: báo cáo định kỳ, thông báo bật/tắt; normal: cảnh báo; high: cảnh báo nghiêm trọng,
+        trả lời lệnh, tin người dùng bấm gửi. Tin ít quan trọng dừng sớm để dành chỗ cho cảnh báo."""
+        if time.time() < self.paused_until:
+            return False
+        hour, day = self._count(3600), self._count(86400)
+        max_h, max_d = config.ZALO_MAX_PER_HOUR, config.ZALO_MAX_PER_DAY
+        if priority == "high":
+            return day < max_d
+        if priority == "normal":
+            return hour < max_h and day < max_d * 0.9
+        return hour < max_h * 0.5 and day < max_d * 0.6
+
+    def send(self, text, chat_ids=None, priority="normal"):
         """Gửi tin tới danh sách chat. Trả True nếu gửi thành công ít nhất 1 nơi."""
         targets = chat_ids or self.chat_ids
         if not self.token or not targets:
             log.info("[Zalo chưa cấu hình] %s", text.replace("\n", " | ")[:200])
+            return False
+        if not self._allowed(priority):
+            self.dropped += 1
+            log.warning("Bỏ qua tin Zalo (%s) để không vượt hạn mức: %s", priority, text.replace("\n", " | ")[:120])
             return False
         if config.DRY_RUN:
             log.info("[DRY_RUN] Zalo -> %s: %s", targets, text.replace("\n", " | ")[:300])
@@ -79,6 +112,7 @@ class ZaloBot:
                             timeout=15,
                         )
                         body = res.json() if res.content else {}
+                        self.sent_times.append(time.time())
                         if res.ok and body.get("ok", True):
                             ok_any = True
                             self.sent_count += 1
@@ -86,6 +120,11 @@ class ZaloBot:
                         else:
                             self.last_error = f"HTTP {res.status_code}: {res.text[:200]}"
                             log.error("Gửi Zalo thất bại: %s", self.last_error)
+                            desc = str(body.get("description", "")).lower()
+                            if res.status_code == 429 or "hạn mức" in desc or "limit" in desc or "quota" in desc:
+                                self.paused_until = time.time() + config.ZALO_PAUSE_MIN * 60
+                                log.error("Zalo báo vượt hạn mức — ngừng gửi %d phút", config.ZALO_PAUSE_MIN)
+                                return ok_any
                     except (requests.RequestException, ValueError) as exc:
                         self.last_error = str(exc)
                         log.error("Lỗi gửi Zalo: %s", exc)

@@ -17,19 +17,18 @@ ESP32 ──► Firebase RTDB ◄──► Web (index.html)        ← xem & đi
                           └─ LLM (Claude / OpenAI / Gemini / Groq...)
 ```
 
-## Chạy nhanh
+## Chạy nhanh (Windows) — 1 file duy nhất
 
-1. Sao chép `server/.env.example` thành `server/.env`, điền:
-   - `ZALO_BOT_TOKEN` = token bot tạo tại https://bot.zapps.me
-   - `ZALO_CHAT_IDS` = chat id người nhận (nhiều người: ngăn cách dấu phẩy)
-   - `LLM_PROVIDER`, `LLM_API_KEY` (và `LLM_MODEL`, `LLM_BASE_URL` nếu cần) — để trống vẫn chạy, chỉ không có phần AI viết lời
-2. Windows: nhấp đúp **`chay_server.bat`** (hoặc `pip install -r server/requirements.txt` rồi `python server/app.py`).
-3. Mở http://localhost:5000. Điện thoại cùng WiFi: `http://<IP máy tính>:5000`.
+Nhấp đúp **`CHAY_NHA_NAM.bat`**. File này:
+1. Lần đầu tự cài Python, thư viện và Cloudflare Tunnel (`cloudflared`), hỏi key Gemini / token Zalo (Enter để bỏ qua). Các lần sau bỏ qua bước cài nên mở nhanh.
+2. Chạy **web + máy chủ AI + link từ xa** trong một cửa sổ. Khoảng 30 giây sau cửa sổ in link `https://….trycloudflare.com` và tự mở trình duyệt; link cũng được gửi về Zalo, ghi vào `LINK_WEB.txt` và hiện ở tab **Cảnh báo**. Không cần đăng nhập.
+3. **Đóng cửa sổ là tắt hết** — không tự chạy khi mở máy, không chạy ngầm gửi tin Zalo.
 
-### Cài trên máy khách + đưa ra Internet (Cloudflare Tunnel)
-Nhấp đúp **`CAI_DAT_NHA_NAM.bat`**: tự cài Python, thư viện, `cloudflared`, đặt mật khẩu web, hỏi key Gemini / token Zalo, cho máy chủ chạy ẩn cùng Windows và in ra link `https://….trycloudflare.com`. Link đổi mỗi lần khởi động lại — link mới tự gửi về Zalo, ghi vào `LINK_WEB.txt` và hiện ở tab Cảnh báo. Tắt bằng `DUNG_NHA_NAM.bat`.
+Link đổi mỗi lần chạy lại. Trong máy: http://localhost:5000 · điện thoại cùng WiFi: `http://<IP máy tính>:5000`.
 
-Chi tiết, cách làm bằng tay và link cố định: [docs/CLOUDFLARE_TUNNEL.md](docs/CLOUDFLARE_TUNNEL.md).
+Còn bản cũ chạy ngầm / tự chạy khi mở máy (bộ cài trước đây): chạy **`DUNG_NHA_NAM.bat`** một lần (CHAY_NHA_NAM.bat cũng tự gỡ).
+
+Cấu hình nằm ở `server/.env` (tạo từ `server/.env.example`): `ZALO_BOT_TOKEN`, `ZALO_CHAT_IDS`, `LLM_*`… Chi tiết đường hầm và link cố định: [docs/CLOUDFLARE_TUNNEL.md](docs/CLOUDFLARE_TUNNEL.md).
 
 > Không biết chat id? Nhắn `chatid` cho bot sau khi chạy server — bot trả lời ID; tab **Cảnh báo** trên web cũng liệt kê các chat đã nhắn.
 >
@@ -85,7 +84,9 @@ Mặc định máy chủ AI **chỉ giám sát**: khi ESP32 tự bật/tắt thi
 Nếu dùng firmware **không** tự điều khiển, đặt `AUTO_CONTROL_ENABLED=true` để máy chủ điều khiển thay (cùng luật với firmware, thêm vùng trễ, ngắt bảo vệ bơm/phun sương sau `PUMP_MAX_ON_MIN`/`MIST_MAX_ON_MIN` phút, tắt thiết bị khi cảm biến lỗi). Không bật cùng lúc với firmware tự điều khiển — hai bên sẽ ghi đè nhau.
 
 ### Zalo
-Tự gửi: **tình trạng định kỳ mỗi `PERIODIC_REPORT_SEC` giây** (mặc định 15 s) kèm nhận định AI (AI viết lại mỗi `PERIODIC_AI_MIN` phút hoặc khi có vấn đề mới, để không vượt hạn mức LLM), cảnh báo mới (kèm “Nhận định AI” nếu có LLM), nhắc lại sau `ALERT_REPEAT_MIN` phút nếu chưa xử lý, báo khi đã ổn định, mỗi lần tự bật/tắt thiết bị, khi có người điều khiển từ web, mất kết nối Firebase, báo cáo buổi sáng lúc `DAILY_REPORT_HOUR`.
+Tự gửi: **tình trạng định kỳ mỗi `PERIODIC_REPORT_SEC` giây** (mặc định 1 giờ, tối thiểu 10 phút) kèm nhận định AI (AI viết lại mỗi `PERIODIC_AI_MIN` phút hoặc khi có vấn đề mới, để không vượt hạn mức LLM), cảnh báo mới (kèm “Nhận định AI” nếu có LLM), nhắc lại sau `ALERT_REPEAT_MIN` phút nếu chưa xử lý, báo khi đã ổn định, mỗi lần tự bật/tắt thiết bị, khi có người điều khiển từ web, mất kết nối Firebase, báo cáo buổi sáng lúc `DAILY_REPORT_HOUR`.
+
+**Hạn mức tin:** Zalo khóa bot gửi quá nhiều (“vượt quá hạn mức gửi tin nhắn”), nên máy chủ tự giới hạn `ZALO_MAX_PER_HOUR` (12) / `ZALO_MAX_PER_DAY` (100) tin; báo cáo định kỳ và thông báo bật/tắt dừng trước để dành chỗ cho cảnh báo; Zalo báo vượt hạn mức thì ngừng gửi `ZALO_PAUSE_MIN` phút. Tab Cảnh báo hiện số tin đã dùng.
 
 Lệnh (chỉ chat có trong `ZALO_CHAT_IDS`): `/trangthai` `/phantich` `/baocao` `/canhbao` `/auto` `/manual` `/bat quat` `/tat bom` `/tat het` `/mo man` `/dong man` `/im 60` `/batthongbao` `chatid` — hoặc hỏi tự do, AI trả lời dựa trên số liệu.
 

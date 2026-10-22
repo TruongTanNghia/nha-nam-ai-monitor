@@ -58,6 +58,7 @@ APP_PASSWORD = _str("APP_PASSWORD")
 # Cloudflare Tunnel: máy chủ tự mở link công khai https://....trycloudflare.com và gửi link về Zalo
 TUNNEL_ENABLED = _bool("TUNNEL_ENABLED", False)
 CLOUDFLARED_PATH = _str("CLOUDFLARED_PATH")  # để trống = tự tìm
+OPEN_BROWSER = _bool("OPEN_BROWSER", False)  # tự mở trình duyệt khi có link (CHAY_NHA_NAM.bat bật)
 LOG_FILE = _str("LOG_FILE")  # ghi log ra file (khi chạy ẩn cùng Windows), vd server/data/server.log
 
 # ---------- Zalo Bot ----------
@@ -65,6 +66,10 @@ ZALO_BOT_TOKEN = _str("ZALO_BOT_TOKEN")
 ZALO_CHAT_IDS = [c.strip() for c in _str("ZALO_CHAT_IDS").split(",") if c.strip()]
 ZALO_API_BASE = _str("ZALO_API_BASE", "https://bot-api.zaloplatforms.com").rstrip("/")
 ZALO_COMMANDS_ENABLED = _bool("ZALO_COMMANDS_ENABLED", True)
+# Zalo giới hạn số tin bot được gửi -> tự giới hạn để không bị khóa ("vượt quá hạn mức gửi tin nhắn")
+ZALO_MAX_PER_HOUR = _int("ZALO_MAX_PER_HOUR", 12)
+ZALO_MAX_PER_DAY = _int("ZALO_MAX_PER_DAY", 100)
+ZALO_PAUSE_MIN = _int("ZALO_PAUSE_MIN", 120)  # Zalo báo vượt hạn mức -> ngừng gửi N phút
 
 # ---------- LLM ----------
 # LLM_PROVIDER: anthropic | openai (mọi API tương thích OpenAI: OpenAI, Gemini, Groq,
@@ -96,7 +101,9 @@ NOTIFY_MANUAL_CHANGES = _bool("NOTIFY_MANUAL_CHANGES", True)
 DEVICE_NOTIFY_MIN = _float("DEVICE_NOTIFY_MIN", 5)  # mỗi thiết bị báo Zalo tối đa 1 lần / N phút
 ALERT_REPEAT_MIN = _float("ALERT_REPEAT_MIN", 30)
 DAILY_REPORT_HOUR = _int("DAILY_REPORT_HOUR", 7)  # -1 để tắt
-PERIODIC_REPORT_SEC = _int("PERIODIC_REPORT_SEC", 15)  # gửi tình trạng định kỳ qua Zalo, 0 = tắt
+PERIODIC_REPORT_SEC = _int("PERIODIC_REPORT_SEC", 3600)  # gửi tình trạng định kỳ qua Zalo, 0 = tắt
+if 0 < PERIODIC_REPORT_SEC < 600:  # 15 giây/lần làm bot hết hạn mức tin nhắn trong vài giờ
+    PERIODIC_REPORT_SEC = 600
 PERIODIC_AI_MIN = _float("PERIODIC_AI_MIN", 5)  # nhận định AI trong tin định kỳ viết lại sau N phút
 HISTORY_RETENTION_DAYS = _int("HISTORY_RETENTION_DAYS", 30)
 

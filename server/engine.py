@@ -296,18 +296,19 @@ class Engine:
                 )
                 if advice:
                     text += "\n\n🧠 Nhận định AI:\n" + advice
-            if self.zalo.send(text + f"\n🕒 {now_text()}"):
+            if self.zalo.send(text + f"\n🕒 {now_text()}", priority="high" if crit else "normal"):
                 for f in new:
                     if f.get("_id"):
                         self.store.mark_alert_sent(f["_id"])
         except Exception:
             log.exception("Lỗi gửi cảnh báo")
 
-    def notify(self, text, important=True):
-        """Gửi tin thông thường (không chặn vòng lặp)."""
+    def notify(self, text, important=True, priority=None):
+        """Gửi tin thông thường (không chặn vòng lặp). important=False -> ưu tiên thấp, dừng sớm khi gần hết hạn mức."""
         if not important and time.time() < self.mute_until:
             return
-        self.outbox.submit(self.zalo.send, f"{text}\n🕒 {now_text()}")
+        self.outbox.submit(self.zalo.send, f"{text}\n🕒 {now_text()}", None,
+                           priority or ("normal" if important else "low"))
 
     # --------------------------------------------------------------- helpers
     def readings_line(self):
@@ -509,7 +510,7 @@ class Engine:
             if ai:
                 age = int((time.time() - self.periodic_ai_ts) / 60)
                 lines.append(f"\n🧠 Nhận định AI ({'vừa cập nhật' if age < 1 else f'{age} phút trước'}):\n{ai}")
-            self.zalo.send("\n".join(lines) + f"\n🕒 {now_text()}")
+            self.zalo.send("\n".join(lines) + f"\n🕒 {now_text()}", priority="low")
         except Exception:
             log.exception("Lỗi gửi báo cáo định kỳ")
         finally:

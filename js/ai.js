@@ -372,7 +372,9 @@ export function renderZalo() {
     <div><dt>Bot token</dt><dd>${z.has_token ? "Đã có" : "Chưa có"}</dd></div>
     <div><dt>Người nhận</dt><dd>${z.chat_count} chat</dd></div>
     <div><dt>Nhận lệnh</dt><dd>${z.commands ? "Bật" : "Tắt"}</dd></div>
-    <div><dt>Đã gửi</dt><dd>${z.sent_count} tin</dd></div>
+    <div><dt>Hạn mức 24 giờ</dt><dd>${z.sent_day ?? 0}/${z.max_day ?? "—"} tin</dd></div>
+    <div><dt>Trong 1 giờ</dt><dd>${z.sent_hour ?? 0}/${z.max_hour ?? "—"} tin${z.dropped ? ` · bỏ qua ${z.dropped}` : ""}</dd></div>
+    ${z.paused_until ? `<div class="err"><dt>Zalo báo vượt hạn mức — tạm ngừng gửi đến</dt><dd>${fmtDateTime(z.paused_until * 1000)}</dd></div>` : ""}
     ${muted ? `<div><dt>Tạm tắt đến</dt><dd>${fmtDateTime(muted * 1000)}</dd></div>` : ""}
     ${z.last_error ? `<div class="err"><dt>Lỗi gần nhất</dt><dd>${esc(z.last_error)}</dd></div>` : ""}`);
   $("#muteSelect").value = muted ? $("#muteSelect").value : "0";
