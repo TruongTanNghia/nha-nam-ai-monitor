@@ -15,7 +15,7 @@ import { $, $$, esc, fmtClock, icon, refreshIcons, setHTML, timeAgo, toast } fro
 import { buildChartCards, gaugeSVG, renderCharts, resetCharts, sparkline, updateGauge } from "./js/charts.js";
 import {
   backend, bindAIControls, connect, fetchHistory, refreshAlerts, refreshHealth,
-  fmtEta, rateText, refreshSnapshot, renderAnalysis, renderEvents, renderZalo,
+  refreshSnapshot, renderAnalysis, renderEvents, renderZalo,
 } from "./js/ai.js";
 
 const firebaseConfig = {
@@ -194,13 +194,7 @@ function renderSensorTiles(data) {
     const { min, max, marks } = gaugeRange(s, value, th);
     updateGauge(tile.querySelector(".gauge-svg"), value, min, max, marks);
 
-    // Dòng cuối thẻ: ngưỡng + dự báo (vd "Tối thiểu 60% · 4′ nữa bật phun sương")
-    let trend = "";
-    const fc = analysis?.forecasts?.[s.key];
-    const next = fc?.events.filter((e) => e.eta_min !== null).sort((x, y) => x.eta_min - y.eta_min)[0];
-    if (next) trend = ` · ${fmtEta(next.eta_min)} nữa ${next.action}`;
-    else if (fc && fc.trend !== "flat") trend = ` · ${fc.trend === "up" ? "↗" : "↘"} ${rateText(s.key, fc.rate_per_min)}`;
-    tile.querySelector(".threshold").textContent = thresholdText(s.key, th) + trend;
+    tile.querySelector(".threshold").textContent = thresholdText(s.key, th);
 
     const series = state.live.slice(-40).map((p) => p[s.key]);
     tile.querySelector(".spark-wrap").innerHTML = sparkline(series);
@@ -264,14 +258,11 @@ function renderHero(data) {
 }
 
 function renderDeviceStrip(data) {
-  const early = backend.online ? backend.snapshot?.predictive?.active || {} : {};
-  const items = DEVICES.map((d) => [d.name, d.icon, Number(data?.[d.key]) === 1, d.key in early]);
+  const items = DEVICES.map((d) => [d.name, d.icon, Number(data?.[d.key]) === 1]);
   const door = Number(data?.MO) === 1 ? "Mở" : Number(data?.DONG) === 1 ? "Đóng" : "—";
-  setHTML($("#deviceStrip"), items.map(([name, ic, on, pre]) => `
-      <div class="dev ${on ? "on" : ""} ${pre ? "pre" : ""}" ${pre ? 'title="Đang bật sớm theo dự báo AI"' : ""}>
-        ${pre ? '<em class="pre-tag">sớm</em>' : ""}${icon(ic)}<span>${esc(name)}</span><b>${on ? "BẬT" : "TẮT"}</b></div>`).join("")
-    + `<div class="dev ${door === "Mở" ? "on" : ""} ${"MO" in early ? "pre" : ""}">${"MO" in early ? '<em class="pre-tag">sớm</em>' : ""}`
-    + `${icon("blinds")}<span>Màn che</span><b>${door.toUpperCase()}</b></div>`);
+  setHTML($("#deviceStrip"), items.map(([name, ic, on]) => `
+      <div class="dev ${on ? "on" : ""}">${icon(ic)}<span>${esc(name)}</span><b>${on ? "BẬT" : "TẮT"}</b></div>`).join("")
+    + `<div class="dev ${door === "Mở" ? "on" : ""}">${icon("blinds")}<span>Màn che</span><b>${door.toUpperCase()}</b></div>`);
 }
 
 /* =========================
@@ -331,43 +322,6 @@ $("#deviceControls").addEventListener("click", async (ev) => {
   } finally {
     state.busy = false;
     renderDeviceControls(state.data);
-  }
-});
-
-/* =========================
-   BẬT SỚM THEO DỰ BÁO
-   Máy chủ AI ghi yêu cầu PRE; firmware ESP32 cộng vào luật ngưỡng (AUTO). Tắt/bật bằng AI_PREDICT.
-========================= */
-function renderPredict(data) {
-  const on = Number(data?.AI_PREDICT ?? 1) !== 0;
-  const sw = $("#predictSwitch");
-  sw.classList.toggle("on", on);
-  sw.setAttribute("aria-checked", on);
-  $("#predictCard").classList.toggle("on", on);
-
-  const p = backend.online ? backend.snapshot?.predictive : null;
-  const notes = [];
-  if (!backend.online) notes.push(["warn", "server-off", "Cần Máy chủ AI chạy thì mới dự báo và bật sớm được."]);
-  else if (p) {
-    if (p.firmware_ok === false) notes.push(["warn", "cpu", "Firmware trên bo chưa hỗ trợ bật sớm — nạp bản aduno.ino mới (có PRE)."]);
-    if (on && p.reason_off) notes.push(["muted", "pause", `Đang tạm dừng: ${p.reason_off}.`]);
-    if (on && !p.reason_off) notes.push(["ok", "radar", `Đang theo dõi: bật trước khi chạm ngưỡng ${p.lead_min} phút.`]);
-    for (const [, a] of Object.entries(p.active || {})) {
-      notes.push(["pre", "zap", `Đang bật sớm ${a.name}: ${a.reason}`]);
-    }
-  }
-  setHTML($("#predictBody"), notes.map(([cls, ic, text]) =>
-    `<div class="predict-note ${cls}">${icon(ic)}<span>${esc(text)}</span></div>`).join(""));
-}
-
-$("#predictSwitch").addEventListener("click", async () => {
-  const next = Number(state.data?.AI_PREDICT ?? 1) !== 0 ? 0 : 1;
-  try {
-    await update(ref(db, "/"), { AI_PREDICT: next });
-    toast(next ? "Đã bật: bật sớm theo dự báo" : "Đã tắt bật sớm theo dự báo");
-  } catch (error) {
-    console.error("Lỗi đổi AI_PREDICT:", error);
-    toast("Không đổi được", "err");
   }
 });
 
@@ -506,7 +460,6 @@ function renderAll() {
   renderSensorTiles(data);
   renderDeviceStrip(data);
   renderDeviceControls(data);
-  renderPredict(data);
   renderSettings(data);
   $("#lastUpdate").textContent = `Cập nhật lúc ${fmtClock(state.lastDataAt)} · ${new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit" })}`;
 }
@@ -614,7 +567,6 @@ async function syncBackend() {
     renderHero(state.data);
     renderSensorTiles(state.data);
     renderDeviceStrip(state.data);
-    renderPredict(state.data);
   }
 }
 

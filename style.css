@@ -240,18 +240,35 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .dev.on svg { color: var(--accent); }
 
 /* ================= DỰ BÁO THIẾT BỊ ================= */
-.forecast-card { margin-bottom: 18px; }
-.soon-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 10px; }
-.soon { display: flex; gap: 14px; align-items: center; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); border-left: 4px solid var(--sk, var(--info)); }
-.soon.trigger { --sk: var(--warn); }
-.soon.recover { --sk: var(--ok); }
-.soon.active { --sk: var(--info); }
-.soon-eta { min-width: 58px; text-align: center; font-family: var(--font-mono); font-size: 22px; letter-spacing: -0.04em; color: var(--sk); }
-.soon-eta svg { width: 22px; height: 22px; }
-.soon-text { font-weight: 600; font-size: 14px; }
-.soon small { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--ink-3); font-size: 12px; margin-top: 2px; }
-.soon .empty, .soon-list .empty { grid-column: 1 / -1; }
-.eta b { font-family: var(--font-mono); }
+.rf-card { margin-bottom: 18px; }
+.rf-body { display: flex; flex-direction: column; gap: 14px; }
+.wx-now { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
+.wx-now > svg { width: 28px; height: 28px; color: var(--info); flex: none; }
+.wx-now > b { font-family: var(--font-mono); font-size: 24px; letter-spacing: -0.04em; }
+.wx-now span { display: block; font-size: 13.5px; font-weight: 600; }
+.wx-now small { color: var(--ink-3); font-size: 12px; }
+.rf-table { display: grid; grid-template-columns: minmax(110px, 1.3fr) repeat(var(--cols), minmax(0, 1fr)); gap: 6px 8px; align-items: center; }
+.rf-col { font-size: 12px; color: var(--ink-3); text-align: center; font-weight: 600; }
+.rf-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; }
+.rf-val { text-align: center; font-family: var(--font-mono); font-size: 14px; padding: 6px 4px; border-radius: 8px; background: var(--surface-2); }
+.rf-val.warn { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+.rf-advice { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rf-advice li { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--ink-2); }
+.rf-advice svg { width: 16px; height: 16px; color: var(--warn); flex: none; margin-top: 1px; }
+.rf-learning { display: flex; gap: 12px; align-items: flex-start; }
+.rf-learning > svg { width: 20px; height: 20px; color: var(--info); animation: spin 2s linear infinite; flex: none; }
+.rf-learning small { display: block; color: var(--ink-3); font-size: 12.5px; margin: 2px 0 8px; }
+.rf-learning > div { flex: 1; }
+.wx-hours { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; margin-top: 10px; }
+.wx-hour { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 6px; border-radius: 12px; background: var(--surface-2); }
+.wx-hour time { font-size: 12px; color: var(--ink-3); }
+.wx-hour svg { width: 20px; height: 20px; color: var(--info); }
+.wx-hour b { font-family: var(--font-mono); }
+.wx-hour small { font-size: 11.5px; color: var(--ink-3); }
+.rf-imp { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.rf-imp > div { display: grid; grid-template-columns: minmax(120px, 1.4fr) 2fr 40px; gap: 8px; align-items: center; font-size: 12.5px; }
+.rf-imp .meter { margin: 0; }
+.rf-imp b { font-family: var(--font-mono); text-align: right; }
 
 /* ================= SENSOR TILES ================= */
 .sensor-group { margin-bottom: 6px; }
@@ -375,20 +392,7 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .select { padding: 9px 12px; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; font-size: 13.5px; }
 
 /* ================= BẬT SỚM THEO DỰ BÁO ================= */
-.predict-card { margin-bottom: 18px; }
-.predict-head { display: flex; align-items: center; gap: 14px; }
-.predict-card.on .predict-head .device-icon { background: var(--brand); border-color: var(--brand); color: var(--accent); }
-.predict-body { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-.predict-body:empty { display: none; }
-.predict-note { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-radius: 10px; font-size: 13px; background: var(--surface-2); color: var(--ink-2); }
-.predict-note svg { width: 16px; height: 16px; margin-top: 1px; }
-.predict-note.ok svg { color: var(--ok); }
-.predict-note.warn { background: var(--warn-soft); color: var(--ink); }
-.predict-note.warn svg { color: var(--warn); }
-.predict-note.pre { background: var(--info-soft); color: var(--ink); font-weight: 600; }
-.predict-note.pre svg { color: var(--info); }
 .dev { position: relative; }
-.pre-tag { position: absolute; top: -7px; right: -5px; padding: 1px 6px; border-radius: 999px; background: var(--accent); color: var(--brand-2); font-style: normal; font-size: 10px; font-weight: 800; letter-spacing: 0.02em; }
 
 /* ================= CHARTS ================= */
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -418,17 +422,6 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .ai-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .span-2 { grid-column: span 2; }
 
-.fc-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 0; border-bottom: 1px dashed var(--line); }
-.fc-row:last-child { border-bottom: 0; }
-.fc-name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
-.fc-vals { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 13px; }
-.trend { width: 16px; height: 16px; }
-.trend.up { color: var(--crit); }
-.trend.down { color: var(--info); }
-.trend.flat { color: var(--ink-3); }
-.eta { grid-column: span 2; font-size: 12px; color: var(--ink-3); }
-.eta.warning { color: var(--warn); font-weight: 700; }
-.eta.critical { color: var(--crit); font-weight: 700; }
 
 .ml-state { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 10px; font-weight: 700; font-size: 13.5px; margin-bottom: 12px; }
 .ml-state.normal { background: var(--ok-soft); color: var(--ok); }
@@ -474,7 +467,6 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .tag.zalo { background: var(--info-soft); color: var(--info); }
 .tag.ok { background: var(--ok-soft); color: var(--ok); }
 .tag.warn { background: var(--warn-soft); color: var(--warn); }
-.tag.pre { background: var(--accent); color: var(--brand-2); margin-left: 6px; }
 
 .zalo-card .kv { margin-bottom: 4px; }
 .chat-ids { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
@@ -598,10 +590,10 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
   .dev svg { width: 17px; height: 17px; }
 
   /* Dự báo */
-  .forecast-card { margin-bottom: 12px; }
-  .soon { gap: 10px; padding: 10px 12px; }
-  .soon-eta { min-width: 44px; font-size: 19px; }
-  .soon-text { font-size: 13px; }
+  .rf-card { margin-bottom: 12px; }
+  .rf-table { grid-template-columns: minmax(84px, 1.2fr) repeat(var(--cols), minmax(0, 1fr)); gap: 5px; }
+  .rf-val { font-size: 12.5px; padding: 5px 2px; }
+  .rf-name { font-size: 12.5px; }
 
   /* Thẻ cảm biến: 2 cột, bỏ đồng hồ, giữ số lớn + trạng thái + sparkline */
   .group-title { font-size: 17px; margin: 4px 0 10px; }
@@ -627,8 +619,6 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
   .event-list .event:nth-child(n+6) { display: none; }  /* điện thoại: 5 hoạt động gần nhất */
 
   /* Điều khiển: thiết bị dạng ô 2 cột, màn che chiếm cả hàng */
-  .predict-card { margin-bottom: 12px; }
-  .predict-head { align-items: flex-start; }
   .device-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .device-item { position: relative; flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 12px; }
   .device-item .switch { position: absolute; top: 12px; right: 12px; }

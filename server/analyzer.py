@@ -1,32 +1,19 @@
-"""Phân tích dữ liệu cảm biến.
+"""Phân tích dữ liệu cảm biến theo luật chuyên gia: vượt ngưỡng kéo dài, cảm biến hỏng/nhiễu/đứng yên,
+thiết bị chạy không hiệu quả, nguồn điện/WiFi ESP32.
 
-Ba lớp phân tích:
-1. Luật chuyên gia: vượt ngưỡng kéo dài, cảm biến hỏng/nhiễu/đứng yên, thiết bị chạy không hiệu quả.
-2. Model ML (IsolationForest): phát hiện tổ hợp giá trị bất thường so với lịch sử 24h.
-3. Dự báo xu hướng (hồi quy tuyến tính 20 phút gần nhất): ước lượng 30 phút tới.
+Phần dự đoán bằng Random Forest + thời tiết ngoài trời nằm ở rf_model.py (chỉ để tham khảo).
 """
 import logging
 import time
 
-import numpy as np
-
 import config
 import indices
 
-from forecast import eta_text, forecast_all, rate_text, sentence
 from sensors import SENSORS, SENSOR_KEYS, fmt, is_valid, lname, num, thresholds
-
-try:
-    from sklearn.ensemble import IsolationForest
-except ImportError:  # vẫn chạy được phần luật nếu thiếu scikit-learn
-    IsolationForest = None
 
 log = logging.getLogger("analyzer")
 
 SEV_RANK = {"ok": 0, "info": 1, "warning": 2, "critical": 3, "fault": 3}
-
-# Độ lệch chuẩn tối thiểu để chuẩn hoá (tránh chia ~0 khi dữ liệu đứng yên)
-MIN_STD = {"t": 0.5, "h": 2, "ANHSANG": 50, "GT_AMDAT": 2, "GT_DOMAN": 20, "GT_PH": 0.1}
 
 ADVICE = {
     "t_high": "Kiểm tra quạt, mở màn che thông gió, có thể phun sương làm mát.",
@@ -149,120 +136,6 @@ def _value_at(rows, key, ts):
 
 
 class Analyzer:
-    def __init__(self):
-        self.model = None
-        self.mean = None
-        self.std = None
-        self.model_info = {
-            "name": "IsolationForest",
-            "trained": False,
-            "samples": 0,
-            "trained_at": None,
-            "note": "Cần ít nhất 300 mẫu (~25 phút dữ liệu) để huấn luyện",
-        }
-        self.last_train = 0
-        self.ml_streak = 0
-
-    # ------------------------------------------------------------------ ML
-    def maybe_train(self, rows, now, every_sec=1800):
-        if IsolationForest is None:
-            self.model_info["note"] = "Chưa cài scikit-learn"
-            return
-        if self.model is not None and now - self.last_train < every_sec:
-            return
-        if self.model is None and now - self.last_train < 120:
-            return  # chưa đủ dữ liệu: thử lại sau 2 phút
-        self.last_train = now
-
-        X = np.array(
-            [[r[k] for k in SENSOR_KEYS] for r in rows
-             if all(is_valid(k, r.get(k)) for k in SENSOR_KEYS)],
-            dtype=float,
-        )
-        if len(X) < 300:
-            self.model_info["samples"] = len(X)
-            return
-        if len(X) > 4000:
-            X = X[np.random.default_rng(0).choice(len(X), 4000, replace=False)]
-
-        mean = X.mean(axis=0)
-        std = np.maximum(X.std(axis=0), [MIN_STD[k] for k in SENSOR_KEYS])
-        model = IsolationForest(n_estimators=150, contamination=0.01, random_state=42)
-        model.fit((X - mean) / std)
-
-        self.model, self.mean, self.std = model, mean, std
-        self.model_info.update(
-            trained=True, samples=int(len(X)), trained_at=now,
-            note="Huấn luyện lại mỗi 30 phút trên dữ liệu 24 giờ gần nhất",
-        )
-        log.info("Đã huấn luyện IsolationForest với %d mẫu", len(X))
-
-    def _ml_check(self, latest):
-        if self.model is None or not all(is_valid(k, latest.get(k)) for k in SENSOR_KEYS):
-            return None, None
-        x = np.array([[latest[k] for k in SENSOR_KEYS]], dtype=float)
-        z = (x - self.mean) / self.std
-        score = float(self.model.decision_function(z)[0])  # <0: bất thường
-        is_anomaly = self.model.predict(z)[0] == -1
-        self.ml_streak = self.ml_streak + 1 if is_anomaly else 0
-
-        contrib = sorted(
-            ({"sensor": k, "z": round(float(z[0][i]), 2)} for i, k in enumerate(SENSOR_KEYS)),
-            key=lambda c: -abs(c["z"]),
-        )
-        result = {"score": round(score, 3), "anomaly": bool(is_anomaly), "top": contrib[:3]}
-
-        # Yêu cầu 3 lần liên tiếp và có ít nhất 1 cảm biến lệch >= 3σ để tránh báo nhầm
-        if self.ml_streak >= 3 and abs(contrib[0]["z"]) >= 3:
-            parts = []
-            for c in contrib[:2]:
-                k = c["sensor"]
-                direction = "cao" if c["z"] > 0 else "thấp"
-                parts.append(f"{SENSORS[k]['name']} {fmt(k, latest[k])} ({direction} bất thường, {abs(c['z']):.1f}σ)")
-            return result, finding(
-                "ml_anomaly", "warning", "ml",
-                "AI phát hiện trạng thái bất thường",
-                "Tổ hợp chỉ số khác hẳn 24h qua: " + "; ".join(parts) + ".",
-                contrib[0]["sensor"],
-            )
-        return result, None
-
-    # ------------------------------------------------------------ Forecast
-    def _forecasts(self, rows, now, th):
-        """Dự báo hành động (forecast.py) + cảnh báo sớm khi xu hướng sắp chạm mức nguy hiểm."""
-        out = forecast_all(rows, now, th)
-        findings = []
-        for key, f in out.items():
-            # Sắp chạm mức cảnh báo/nguy hiểm theo đánh giá sức khỏe (không chỉ ngưỡng thiết bị)
-            f["eta_min"], f["eta_level"] = None, None
-            if f["trend"] != "flat":
-                now_level = SEV_RANK[sensor_status(key, f["now"], th)[0]]
-                lo, hi = SENSORS[key]["phys"]
-                for m in range(1, 61):
-                    # kẹp trong giới hạn vật lý: kéo dài xu hướng quá xa không được thành "lỗi cảm biến"
-                    value = min(max(f["now"] + f["rate_per_min"] * m, lo), hi)
-                    lvl, _ = sensor_status(key, value, th)
-                    if lvl != "fault" and SEV_RANK[lvl] >= 2 and SEV_RANK[lvl] > now_level:
-                        f["eta_min"], f["eta_level"] = m, lvl
-                        break
-            if f["eta_min"] is not None:
-                sev = "warning" if f["eta_level"] == "critical" and f["eta_min"] <= 20 else "info"
-                findings.append(finding(
-                    f"forecast_{key}", sev, "forecast",
-                    f"Dự báo: {lname(key)} sắp tới mức {'nguy hiểm' if f['eta_level'] == 'critical' else 'cảnh báo'}",
-                    f"{SENSORS[key]['name']} đang {rate_text(key, f['rate_per_min'])}, "
-                    f"{eta_text(f['eta_min'])} nữa sẽ tới mức {'nguy hiểm' if f['eta_level'] == 'critical' else 'cảnh báo'}.",
-                    key,
-                ))
-            # Thiết bị sắp được ESP32 bật/ngắt trong 15 phút tới
-            for e in f["events"]:
-                if e["kind"] == "trigger" and e["eta_min"] <= 15:
-                    findings.append(finding(
-                        f"soon_{key}_{e['setting']}", "info", "forecast",
-                        f"Sắp {e['action']}", sentence(e["text"]) + ".", key,
-                    ))
-        return out, findings
-
     # ---------------------------------------------------------- Main entry
     def evaluate(self, data, rows, now=None, hw_last_change=None, hw_info=None):
         """data: bản ghi Firebase mới nhất; rows: lịch sử gần đây (cũ -> mới, đã gồm bản mới nhất)."""
@@ -404,15 +277,6 @@ class Analyzer:
         # 3) Hiệu quả thiết bị
         findings += self._device_checks(data, rows, now, th)
 
-        # 4) Model ML
-        ml_result, ml_finding = self._ml_check(latest)
-        if ml_finding:
-            findings.append(ml_finding)
-
-        # 5) Dự báo
-        forecasts, fc_findings = self._forecasts(rows, now, th)
-        findings += fc_findings
-
         # Hai chỉ số riêng: môi trường nhà nấm và chất lượng nước cấp (không trung bình hóa với nhau)
         idx = indices.compute(sensors, findings, data, th)
         # Cảnh báo riêng cho nước cấp, chỉ khi lệch kéo dài >= 1 phút (pH dao động sát ngưỡng không gây báo liên tục)
@@ -433,8 +297,6 @@ class Analyzer:
             "summary": self._summary(findings, idx),
             "sensors": sensors,
             "findings": findings,
-            "forecasts": forecasts,
-            "ml": {**self.model_info, "latest": ml_result},
         }
 
     def _device_checks(self, data, rows, now, th):

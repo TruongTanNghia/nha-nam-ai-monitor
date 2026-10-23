@@ -7,7 +7,6 @@ import indices
 import llm
 from analyzer import SEV_RANK
 from engine import SEV_ICON, now_text
-from forecast import sentence
 from sensors import DEVICES
 
 log = logging.getLogger("commands")
@@ -20,7 +19,8 @@ DEVICE_ALIASES = {
 
 HELP = """🤖 TRỢ LÝ NHÀ NẤM — danh sách lệnh
 📊 /trangthai — số liệu hiện tại
-🧪 /phantich — kết quả phân tích AI
+🧪 /phantich — phân tích (Random Forest + thời tiết)
+🌤 /thoitiet — thời tiết ngoài trời
 📋 /baocao — báo cáo 24 giờ
 🔔 /canhbao — các cảnh báo đang mở
 ⚙️ /auto | /manual — đổi chế độ
@@ -76,6 +76,8 @@ class CommandHandler:
             return self.reply(chat_id, self.status_text())
         if cmd in ("phantich", "phan tich", "analysis", "pt"):
             return self.reply(chat_id, self.analysis_text())
+        if cmd in ("thoitiet", "thoi tiet", "weather"):
+            return self.reply(chat_id, e.weather.text() or "⏳ Chưa lấy được thời tiết ngoài trời (kiểm tra Internet).")
         if cmd in ("baocao", "bao cao", "report", "bc"):
             if llm.status()["enabled"]:
                 self.reply(chat_id, "⏳ Đang tổng hợp báo cáo...")
@@ -156,15 +158,7 @@ class CommandHandler:
                 lines.append(f"{SEV_ICON[f['severity']]} {f['title']}: {f['detail']}")
         else:
             lines.append("✅ Không phát hiện vấn đề.")
-        fc = a.get("forecasts") or {}
-        if fc:
-            lines.append("🔮 Dự báo:")
-            for f in fc.values():
-                lines.append(f"• {sentence(f['headline'])}")
-        ml = a.get("ml") or {}
-        if ml.get("trained"):
-            state = "BẤT THƯỜNG" if (ml.get("latest") or {}).get("anomaly") else "bình thường"
-            lines.append(f"🤖 Model {ml['name']} ({ml['samples']} mẫu): {state}")
+        lines += ["", *self.engine.rf_report()]
         return "\n".join(lines)
 
     def alerts_text(self):

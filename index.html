@@ -118,12 +118,12 @@
           <div class="device-strip" id="deviceStrip"></div>
         </div>
 
-        <div class="card reveal forecast-card">
+        <div class="card reveal rf-card">
           <div class="card-head">
-            <h3><i data-lucide="timer"></i> Dự báo thiết bị</h3>
-            <span class="hint">Theo xu hướng vài phút gần nhất và ngưỡng đang cài</span>
+            <h3><i data-lucide="trees"></i> Phân tích Random Forest + thời tiết</h3>
+            <span class="hint">Chỉ để tham khảo — thiết bị vẫn bật/tắt theo ngưỡng</span>
           </div>
-          <div class="soon-list" id="soonList"></div>
+          <div class="rf-body" id="rfOverview"></div>
         </div>
 
         <section class="sensor-group">
@@ -154,17 +154,6 @@
 
       <!-- ========== TAB: ĐIỀU KHIỂN ========== -->
       <section id="dieukhien" class="tab-content">
-        <div class="card predict-card" id="predictCard">
-          <div class="predict-head">
-            <span class="device-icon"><i data-lucide="timer"></i></span>
-            <div class="device-text">
-              <div class="device-name">Bật sớm theo dự báo AI</div>
-              <small id="predictDesc">Bật thiết bị trước khi chỉ số chạm ngưỡng, để nhà nấm không bị nóng/khô đột ngột.</small>
-            </div>
-            <button class="switch" role="switch" aria-checked="false" aria-label="Bật sớm theo dự báo AI" id="predictSwitch"><span></span></button>
-          </div>
-          <div class="predict-body" id="predictBody"></div>
-        </div>
         <div class="control-layout">
           <div class="card">
             <div class="card-head">
@@ -210,23 +199,24 @@
           <div class="card span-2">
             <div class="card-head">
               <h3><i data-lucide="scan-search"></i> Kết quả phân tích</h3>
-              <span class="hint">Luật chuyên gia + model ML + dự báo xu hướng</span>
+              <span class="hint">Luật chuyên gia theo ngưỡng + nguồn điện/WiFi ESP32</span>
             </div>
             <div class="finding-list" id="aiFindings"></div>
           </div>
 
           <div class="card">
             <div class="card-head">
-              <h3><i data-lucide="trending-up"></i> Dự báo 30 phút tới</h3>
+              <h3><i data-lucide="cloud-sun"></i> Thời tiết ngoài trời</h3>
+              <span class="hint" id="weatherHint">Open-Meteo</span>
             </div>
-            <div class="forecast" id="forecastTable"></div>
+            <div class="weather-card" id="weatherCard"></div>
           </div>
 
           <div class="card">
             <div class="card-head">
-              <h3><i data-lucide="cpu"></i> Model phát hiện bất thường</h3>
+              <h3><i data-lucide="trees"></i> Mô hình Random Forest</h3>
             </div>
-            <div id="mlCard" class="ml-card"></div>
+            <div id="rfModel" class="ml-card"></div>
           </div>
 
           <div class="card span-2">

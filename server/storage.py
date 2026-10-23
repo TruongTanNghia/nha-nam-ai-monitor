@@ -44,6 +44,9 @@ class Storage:
                 );
                 CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts);
                 CREATE INDEX IF NOT EXISTS idx_events_ts ON device_events(ts);
+                CREATE TABLE IF NOT EXISTS weather_hourly (
+                    ts INTEGER PRIMARY KEY, temp REAL, hum REAL, cloud REAL, rad REAL, precip REAL, wind REAL
+                );
                 """
             )
 
@@ -78,6 +81,33 @@ class Storage:
                 (bucket, bucket, now - span),
             ).fetchall()
         return {"range": range_key, "bucket_sec": bucket, "points": [dict(r) for r in rows]}
+
+    def hourly_readings(self, since_ts, min_samples=30):
+        """Trung bình từng giờ (giờ tròn, epoch) của cảm biến + tỉ lệ thời gian bật thiết bị."""
+        sensors = ", ".join(f'AVG("{k}") AS "{k}"' for k in SENSOR_KEYS)
+        devices = ", ".join(f'AVG("{k}") AS "{k}"' for k in DEVICE_KEYS)
+        with self.lock:
+            rows = self.conn.execute(
+                f"""SELECT CAST(ts / 3600 AS INTEGER) * 3600 AS hour, COUNT(*) AS n, {sensors}, {devices}
+                    FROM readings WHERE ts >= ? GROUP BY hour HAVING n >= ? ORDER BY hour""",
+                (since_ts, min_samples),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---------- thời tiết ngoài trời (theo giờ) ----------
+    def add_weather(self, rows):
+        with self.lock, self.conn:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO weather_hourly (ts, temp, hum, cloud, rad, precip, wind) VALUES (?,?,?,?,?,?,?)",
+                [(r["ts"], r["temp"], r["hum"], r["cloud"], r["rad"], r["precip"], r["wind"]) for r in rows],
+            )
+
+    def weather_between(self, start_ts, end_ts):
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT * FROM weather_hourly WHERE ts >= ? AND ts <= ? ORDER BY ts", (start_ts, end_ts)
+            ).fetchall()
+        return {r["ts"]: dict(r) for r in rows}
 
     def prune(self):
         cutoff = time.time() - config.HISTORY_RETENTION_DAYS * 86400

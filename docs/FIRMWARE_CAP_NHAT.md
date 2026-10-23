@@ -2,7 +2,7 @@
 
 > **Cách đơn giản nhất:** chép đè toàn bộ `aduno.ino` mới nhất vào file `.ino` đang dùng (giữ `secrets.h` cùng thư mục). Bản mới đã gồm mọi mục dưới đây **và** các sửa cho nguồn/WiFi chập chờn: mất WiFi vẫn chạy AUTO, rơ-le được cài ngay khi khởi động, vùng trễ + chống rơ-le đóng ngắt liên tục, bật thiết bị lệch nhau để tránh sụt áp, đọc pH/độ ẩm đất nhiều mẫu, báo lý do khởi động lại và sóng WiFi. Phần cứng: xem [PHAN_CUNG_ON_DINH.md](PHAN_CUNG_ON_DINH.md).
 
-`aduno.ino` trong repo đã có sẵn mọi thay đổi dưới đây. Nếu bo đang chạy file khác (vd `Codenhanam2026_amthanh.ino`), sửa 4 chỗ sau rồi nạp lại.
+`aduno.ino` trong repo đã có sẵn mọi thay đổi dưới đây. Nếu bo đang chạy file khác (vd `Codenhanam2026_amthanh.ino`), sửa 3 chỗ sau rồi nạp lại.
 
 ## 1. Không ghi đè ngưỡng và chế độ (sửa lỗi "bấm Lưu cài đặt là mất")
 
@@ -45,46 +45,6 @@ Trong hàm gửi Firebase, ngay sau `doc["t"] = t;`:
 ```cpp
 JsonObject espTs = doc.createNestedObject("ESP_TS");
 espTs[".sv"] = "timestamp";
-doc["PRE_ACK"] = preSeq;   // báo đã hỗ trợ bật sớm (mục 4)
 ```
 
-## 4. Bật sớm theo dự báo
-
-**Biến toàn cục** (dưới `int MODE = 1;`):
-
-```cpp
-int PRE_BOM = 0, PRE_DEN = 0, PRE_QUAT = 0, PRE_SUONG = 0, PRE_MO = 0;
-long preSeq = -1;
-unsigned long preSeenAt = 0;
-const unsigned long PRE_TIMEOUT = 60000;   // máy chủ im lặng 60 giây -> bỏ yêu cầu
-```
-
-**Trong `readSetValues()`**, trước `return true;`:
-
-```cpp
-JsonObject pre = doc["PRE"];
-if (!pre.isNull()) {
-  long seq = pre["SEQ"] | -1L;
-  if (seq != preSeq) { preSeq = seq; preSeenAt = millis(); }
-  PRE_BOM   = pre["BOM"]   | 0;
-  PRE_DEN   = pre["DEN"]   | 0;
-  PRE_QUAT  = pre["QUAT"]  | 0;
-  PRE_SUONG = pre["SUONG"] | 0;
-  PRE_MO    = pre["MO"]    | 0;
-}
-```
-
-**Trong `autoMode()`**, đầu hàm thêm `bool pre = preSeq >= 0 && (millis() - preSeenAt) < PRE_TIMEOUT;` rồi sửa các điều kiện:
-
-```cpp
-if (ANHSANG < SET_AS || (pre && PRE_DEN)) DEN = 1; else DEN = 0;
-if (ANHSANG > SET_AS && !(pre && PRE_MO)) { MO = 0; DONG = 1; } else { MO = 1; DONG = 0; }
-if (t > SET_T || (pre && PRE_QUAT)) QUAT = 1; else QUAT = 0;
-if (h < SET_H || (pre && PRE_SUONG)) SUONG = 1; else SUONG = 0;
-...
-} else if (GT_AMDAT < SET_AMDAT || (pre && PRE_BOM)) {   // nhánh bật bơm
-```
-
-Giữ nguyên đoạn khóa an toàn phía sau (`pH ngoài ngưỡng -> BOM = 0, SUONG = 0`, `độ mặn cao -> BOM = 0`) — khóa luôn thắng yêu cầu bật sớm.
-
-Nạp xong, tab **Điều khiển → Bật sớm theo dự báo AI** sẽ hết dòng "Firmware trên bo chưa hỗ trợ bật sớm".
+> **Đã bỏ “bật sớm theo dự báo” (PRE):** thiết bị chỉ bật/tắt theo ngưỡng. Nếu firmware trên bo còn đoạn đọc `doc["PRE"]`, biến `PRE_*`/`preSeq` và điều kiện `(pre && PRE_...)` trong `autoMode()`, hãy xóa (hoặc chép đè `aduno.ino` mới). Máy chủ AI cũng tự xóa khóa `PRE`, `AI_PREDICT`, `PRE_ACK` trên Firebase khi khởi động nên firmware cũ không còn bật sớm nữa.

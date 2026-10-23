@@ -126,6 +126,9 @@ if ((Get-EnvValue "APP_PASSWORD") -like "nhanam-*") { Set-EnvValue "APP_PASSWORD
 # Bao cao dinh ky 15 giay/lan lam bot Zalo het han muc -> toi thieu 1 gio/lan
 $periodic = 0; [void][int]::TryParse((Get-EnvValue "PERIODIC_REPORT_SEC"), [ref]$periodic)
 if ($periodic -gt 0 -and $periodic -lt 600) { Set-EnvValue "PERIODIC_REPORT_SEC" "3600"; Ok "Bao cao Zalo dinh ky: moi 1 gio" }
+# Bao MOI lan bat/tat + mach tat/mo lai -> nang han muc cu 12/100 tin len 30/300
+if ((Get-EnvValue "ZALO_MAX_PER_HOUR") -eq "12") { Set-EnvValue "ZALO_MAX_PER_HOUR" "30" }
+if ((Get-EnvValue "ZALO_MAX_PER_DAY") -eq "100") { Set-EnvValue "ZALO_MAX_PER_DAY" "300" }
 if ($firstRun) {
     $key = Read-Host "    Dan API key Gemini (Enter de bo qua)"
     if ($key) {

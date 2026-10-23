@@ -5,9 +5,9 @@ import { $, $$, esc, fmtDateTime, icon, refreshIcons, setHTML, timeAgo, toast } 
 const STORAGE_KEY = "nhanam.backendUrl";
 const SEV_TEXT = { critical: "Nghiêm trọng", warning: "Cảnh báo", info: "Ghi chú" };
 const SEV_ICON = { critical: "octagon-alert", warning: "triangle-alert", info: "info" };
-const CAT_TEXT = { threshold: "Ngưỡng", sensor: "Cảm biến", device: "Thiết bị", ml: "Model ML", forecast: "Dự báo", system: "Hệ thống", water: "Nước cấp" };
+const CAT_TEXT = { threshold: "Ngưỡng", sensor: "Cảm biến", device: "Thiết bị", system: "Hệ thống", water: "Nước cấp" };
 const DEVICE_NAME = { BOM: "Máy bơm", DEN: "Đèn", QUAT: "Quạt", SUONG: "Phun sương", MO: "Màn che (mở)", DONG: "Màn che (đóng)", MODE: "Chế độ" };
-const SOURCE_TEXT = { auto: "Máy chủ AI", esp_auto: "ESP32 tự động", zalo: "Zalo", external: "Web", predict: "Bật sớm theo dự báo", esp: "Lý do" };
+const SOURCE_TEXT = { auto: "Máy chủ AI", esp_auto: "ESP32 tự động", zalo: "Zalo", external: "Web", predict: "Bật sớm (bản cũ)", esp: "ESP32" };
 
 export const backend = {
   url: null,
@@ -140,12 +140,12 @@ export function renderAnalysis() {
     ? offlineHTML()
     : a?.findings?.length
       ? a.findings.map((f) => findingHTML(f)).join("")
-      : emptyState("circle-check", "Không phát hiện bất thường", "Luật chuyên gia, model ML và dự báo đều cho kết quả tốt."));
+      : emptyState("circle-check", "Không phát hiện bất thường", "Mọi chỉ số nằm trong ngưỡng, cảm biến và thiết bị hoạt động bình thường."));
 
-  renderForecast(a);
-  renderSoon();
+  renderRF();
+  renderWeather();
+  renderRFModel();
   renderHardwareInfo();
-  renderML(a);
 
   const llm = backend.health?.llm;
   $("#llmHint").textContent = !backend.online
@@ -153,109 +153,92 @@ export function renderAnalysis() {
     : llm?.enabled ? `${llm.provider} · ${llm.model}` : "Chưa cấu hình LLM — thêm LLM_API_KEY trong server/.env";
 }
 
-const ARROW = { up: "trending-up", down: "trending-down", flat: "move-right" };
+/* ================= Random Forest + thời tiết (chỉ tham khảo) ================= */
+const RF_TARGETS = [["t", "Nhiệt độ", "SET_T", 1], ["h", "Độ ẩm KK", "SET_H", -1], ["GT_AMDAT", "Độ ẩm đất", "SET_AMDAT", -1]];
+const fmtHour = (ts) => new Date(ts * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 
-/** "khoảng 4 phút nữa ..." -> "Khoảng 4 phút nữa ..." */
-const cap = (text) => (!text || text.startsWith("pH") ? text || "" : text[0].toUpperCase() + text.slice(1));
-
-export function fmtEta(min) {
-  if (min === null || min === undefined) return "";
-  if (min < 1) return "<1′";
-  return min < 60 ? `${Math.round(min)}′` : `${(min / 60).toFixed(1).replace(".0", "")}h`;
+function weatherNowHTML(w) {
+  const c = w?.current;
+  if (!c || c.temp === null || c.temp === undefined) return "";
+  const rain = c.precip > 0 ? ` · mưa ${c.precip} mm` : "";
+  return `
+    <div class="wx-now">
+      ${icon(c.precip > 0 ? "cloud-rain" : c.cloud >= 70 ? "cloud" : "cloud-sun")}
+      <b>${Math.round(c.temp)}°C</b>
+      <div><span>Ẩm ${Math.round(c.hum)}% · mây ${Math.round(c.cloud)}% · gió ${Math.round(c.wind)} km/h${rain}</span>
+        <small>Ngoài trời · ${esc(w.location?.name || "")}</small></div>
+    </div>`;
 }
 
-/** Thẻ "Dự báo thiết bị" ở trang tổng quan: các sự kiện sắp xảy ra, gần nhất trước */
-export function renderSoon() {
-  const el = $("#soonList");
-  if (!backend.online) {
-    return setHTML(el, emptyState("server-off", "Cần Máy chủ AI", "Chạy python server/app.py để xem bao lâu nữa thiết bị sẽ bật/tắt."));
-  }
+/** Thẻ tổng quan: thời tiết ngoài trời + Random Forest dự đoán 1-3 giờ tới + gợi ý */
+function renderRF() {
+  const el = $("#rfOverview");
+  if (!backend.online) return setHTML(el, emptyState("server-off", "Cần Máy chủ AI", "Chạy CHAY_NHA_NAM.bat để phân tích bằng Random Forest và thời tiết ngoài trời."));
+  const rf = backend.snapshot?.rf;
+  const w = backend.snapshot?.weather;
+  const th = backend.snapshot?.data || {};
+  let body;
   if (backend.hardwareOffline) {
-    return setHTML(el, emptyState("unplug", "Tạm dừng dự báo", "ESP32 đang mất kết nối nên số liệu đã cũ, dự báo sẽ chạy lại khi bo mạch gửi dữ liệu."));
-  }
-  const fc = backend.snapshot?.analysis?.forecasts || {};
-  if (!Object.keys(fc).length) {
-    return setHTML(el, emptyState("hourglass", "Đang đo xu hướng", "Cần khoảng 1 phút dữ liệu liên tục để dự báo."));
-  }
-  const events = Object.entries(fc).flatMap(([k, f]) => f.events.map((e) => ({ ...e, sensor: k })));
-  events.sort((a, b) => (a.eta_min ?? 1e9) - (b.eta_min ?? 1e9));
-  if (!events.length) {
-    return setHTML(el, emptyState("circle-check", "Chưa có thiết bị nào sắp đổi trạng thái",
-      "Các chỉ số đang đi ngang hoặc còn xa ngưỡng."));
-  }
-  const early = backend.snapshot?.predictive?.active || {};
-  const DEVICE_FOR = { t: "QUAT", h: "SUONG", GT_AMDAT: "BOM", ANHSANG: "DEN" };  // ANHSANG còn mở màn che (MO)
-  setHTML(el, events.slice(0, 5).map((e) => `
-    <div class="soon ${e.kind}">
-      <b class="soon-eta">${e.eta_min !== null ? fmtEta(e.eta_min) : icon("activity")}</b>
-      <div>
-        <div class="soon-text">${esc(cap(e.text))}
-          ${e.kind === "trigger" && DEVICE_FOR[e.sensor] in early ? '<span class="tag pre">Đang bật sớm</span>' : ""}</div>
-        <small><span class="swatch" style="background:var(${SENSOR_BY_KEY[e.sensor].color})"></span>
-          ${esc(SENSOR_BY_KEY[e.sensor].name)} ${fmtWithUnit(e.sensor, fc[e.sensor].now)}
-          ${fc[e.sensor].trend !== "flat" ? `· ${rateText(e.sensor, fc[e.sensor].rate_per_min)}` : ""}</small>
-      </div>
-    </div>`).join(""));
-}
-
-export function rateText(key, rate) {
-  const unit = SENSOR_BY_KEY[key].unit;
-  const digits = key === "GT_PH" ? 2 : 1;
-  const value = Math.abs(rate).toFixed(digits).replace(/\.?0+$/, "");
-  const sep = ["%", "°C", ""].includes(unit) ? "" : " ";
-  return `${rate > 0 ? "tăng" : "giảm"} ${value}${sep}${unit}/phút`;
-}
-
-function renderForecast(a) {
-  const el = $("#forecastTable");
-  if (!backend.online) return setHTML(el, offlineHTML());
-  const fc = a?.forecasts || {};
-  const keys = Object.keys(fc);
-  if (!keys.length) {
-    return setHTML(el, emptyState("hourglass", "Đang đo xu hướng", "Cần khoảng 1 phút dữ liệu liên tục để dự báo."));
-  }
-  const rows = keys.map((k) => {
-    const f = fc[k];
-    const timed = f.events.filter((e) => e.eta_min !== null).sort((x, y) => x.eta_min - y.eta_min)[0];
-    const missing = f.missing_thresholds.length ? " · chưa cài ngưỡng nên chưa dự báo được thiết bị" : "";
-    return `
-      <div class="fc-row">
-        <div class="fc-name"><span class="swatch" style="background:var(${SENSOR_BY_KEY[k].color})"></span>${esc(SENSOR_BY_KEY[k].name)}</div>
-        <div class="fc-vals">
-          <b>${fmtWithUnit(k, f.now)}</b>
-          ${icon(ARROW[f.trend], `trend ${f.trend}`)}
-          <span>${f.trend === "flat" ? "đi ngang" : rateText(k, f.rate_per_min)}</span>
-        </div>
-        <span class="eta ${timed?.kind === "trigger" ? "warning" : ""}">
-          ${timed ? `<b>${fmtEta(timed.eta_min)}</b> ` : ""}${esc(cap(f.headline))}${esc(missing)}
-        </span>
+    body = emptyState("unplug", "Tạm dừng phân tích", "ESP32 đang mất kết nối nên số liệu trong nhà đã cũ.");
+  } else if (!rf?.predictions?.length) {
+    const pct = Math.min(100, Math.round(((rf?.samples || 0) / 24) * 100));
+    body = `
+      <div class="rf-learning">
+        ${icon("loader")}<div><b>Random Forest đang học</b><small>${esc(rf?.note || "Đang chờ dữ liệu")}</small>
+        <div class="meter"><span style="width:${pct}%"></span></div></div>
       </div>`;
-  });
-  setHTML(el, rows.join(""));
+  } else {
+    const head = `<div></div><div class="rf-col">Bây giờ</div>` + rf.predictions.map((p) => `<div class="rf-col">+${p.hours} giờ</div>`).join("");
+    const rows = RF_TARGETS.map(([k, name, setKey, dir]) => {
+      const lim = Number(th[setKey]) || 0;
+      const bad = (v) => lim && v !== null && (dir > 0 ? v > lim : v < lim);
+      const cell = (v) => `<div class="rf-val ${bad(v) ? "warn" : ""}">${v === null || v === undefined ? "—" : fmtWithUnit(k, v)}</div>`;
+      return `<div class="rf-name"><span class="swatch" style="background:var(${SENSOR_BY_KEY[k].color})"></span>${name}</div>`
+        + cell(rf.now?.[k]) + rf.predictions.map((p) => cell(p[k])).join("");
+    }).join("");
+    body = `<div class="rf-table" style="--cols:${rf.predictions.length + 1}">${head}${rows}</div>`;
+  }
+  const advice = rf?.advice?.length && !backend.hardwareOffline
+    ? `<ul class="rf-advice">${rf.advice.map((t) => `<li>${icon("lightbulb")}<span>${esc(t)}</span></li>`).join("")}</ul>` : "";
+  setHTML(el, weatherNowHTML(w) + body + advice);
 }
 
-function renderML(a) {
-  const el = $("#mlCard");
+function renderWeather() {
+  const el = $("#weatherCard");
   if (!backend.online) return setHTML(el, offlineHTML());
-  const ml = a?.ml;
-  if (!ml) return setHTML(el, "");
-  const latest = ml.latest;
-  const scorePct = latest ? Math.round(Math.min(1, Math.max(0, 0.5 - latest.score)) * 100) : 0;
-  const state = !ml.trained ? "learning" : latest?.anomaly ? "anomaly" : "normal";
-  const stateText = { learning: "Đang học dữ liệu", anomaly: "Phát hiện bất thường", normal: "Hoạt động bình thường" }[state];
+  const w = backend.snapshot?.weather;
+  if (!w?.current) {
+    return setHTML(el, emptyState("cloud-off", "Chưa lấy được thời tiết", w?.error ? `Lỗi: ${w.error}` : "Đang tải dữ liệu từ Open-Meteo…"));
+  }
+  $("#weatherHint").textContent = w.updated ? `Open-Meteo · ${timeAgo(w.updated * 1000)}` : "Open-Meteo";
+  const next = (w.next_hours || []).map((h) => `
+    <div class="wx-hour">
+      <time>${fmtHour(h.ts)}</time>${icon(h.precip > 0.1 ? "cloud-rain" : h.cloud >= 70 ? "cloud" : "sun")}
+      <b>${Math.round(h.temp)}°C</b><small>ẩm ${Math.round(h.hum)}%${h.precip > 0 ? ` · ${h.precip} mm` : ""}</small>
+    </div>`).join("");
+  setHTML(el, weatherNowHTML(w) + (next ? `<div class="wx-hours">${next}</div>` : "")
+    + `<p class="note">Vị trí: ${esc(w.location?.name || "?")} (${w.location?.lat?.toFixed(2)}, ${w.location?.lon?.toFixed(2)}) — đặt WEATHER_LAT/WEATHER_LON trong server/.env nếu chưa đúng.</p>`);
+}
+
+function renderRFModel() {
+  const el = $("#rfModel");
+  if (!backend.online) return setHTML(el, offlineHTML());
+  const rf = backend.snapshot?.rf;
+  if (!rf) return setHTML(el, "");
+  const UNIT = { t: "°C", h: "%", GT_AMDAT: "%" };
+  const mae = Object.entries(rf.mae || {}).map(([k, v]) => `${SENSOR_BY_KEY[k].name.toLowerCase()} ±${v}${UNIT[k]}`).join(", ");
   setHTML(el, `
-    <div class="ml-state ${state}">${icon(state === "anomaly" ? "triangle-alert" : state === "learning" ? "loader" : "shield-check")} ${stateText}</div>
+    <div class="ml-state ${rf.trained ? "normal" : "learning"}">${icon(rf.trained ? "shield-check" : "loader")} ${rf.trained ? "Đã huấn luyện" : "Đang học dữ liệu"}</div>
     <dl class="kv">
-      <div><dt>Thuật toán</dt><dd>${esc(ml.name)}</dd></div>
-      <div><dt>Dữ liệu huấn luyện</dt><dd>${ml.samples ?? 0} mẫu</dd></div>
-      <div><dt>Lần huấn luyện</dt><dd>${ml.trained_at ? timeAgo(ml.trained_at * 1000) : "—"}</dd></div>
+      <div><dt>Thuật toán</dt><dd>Random Forest (200 cây)</dd></div>
+      <div><dt>Dữ liệu huấn luyện</dt><dd>${rf.samples ?? 0} giờ (cảm biến + thời tiết)</dd></div>
+      <div><dt>Lần huấn luyện</dt><dd>${rf.trained_at ? timeAgo(rf.trained_at * 1000) : "—"}</dd></div>
+      ${mae ? `<div><dt>Sai số trung bình (1 giờ tới)</dt><dd>${esc(mae)}</dd></div>` : ""}
     </dl>
-    ${latest ? `
-      <div class="meter-label"><span>Mức bất thường hiện tại</span><b>${scorePct}%</b></div>
-      <div class="meter"><span style="width:${scorePct}%"></span></div>
-      <div class="ml-top">Ảnh hưởng nhiều nhất: ${latest.top.map((t) =>
-        `<span>${esc(SENSOR_BY_KEY[t.sensor].name)} <b>${t.z > 0 ? "+" : ""}${t.z}σ</b></span>`).join("")}</div>` : ""}
-    <p class="note">${esc(ml.note || "")}</p>`);
+    ${rf.importance?.length ? `<div class="meter-label"><span>Yếu tố ảnh hưởng nhiều nhất</span></div>
+      <div class="rf-imp">${rf.importance.map((i) => `
+        <div><span>${esc(i.name)}</span><div class="meter"><span style="width:${i.pct}%"></span></div><b>${i.pct}%</b></div>`).join("")}</div>` : ""}
+    <p class="note">${esc(rf.note || "")}. Kết quả chỉ để tham khảo, thiết bị vẫn bật/tắt theo ngưỡng cài đặt.</p>`);
 }
 
 function fmtDuration(sec) {
@@ -295,6 +278,7 @@ export function renderEvents(events) {
   setHTML(el, events.slice(0, 8).map((e) => {
     const on = Number(e.value) === 1;
     const what = e.device === "ESP_RESTART" ? "ESP32 khởi động lại"
+      : e.device === "ESP_LINK" ? (on ? "ESP32 hoạt động lại" : "ESP32 tắt / mất kết nối")
       : e.device === "MODE" ? `Chế độ ${on ? "AUTO" : "MANUAL"}` : `${on ? "Bật" : "Tắt"} ${DEVICE_NAME[e.device] || e.device}`;
     return `
       <div class="event">

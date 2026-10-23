@@ -34,6 +34,13 @@ def _float(name, default):
         return default
 
 
+def _opt_float(name):
+    try:
+        return float(os.getenv(name, ""))
+    except ValueError:
+        return None
+
+
 def _bool(name, default):
     raw = os.getenv(name)
     if raw is None:
@@ -67,8 +74,8 @@ ZALO_CHAT_IDS = [c.strip() for c in _str("ZALO_CHAT_IDS").split(",") if c.strip(
 ZALO_API_BASE = _str("ZALO_API_BASE", "https://bot-api.zaloplatforms.com").rstrip("/")
 ZALO_COMMANDS_ENABLED = _bool("ZALO_COMMANDS_ENABLED", True)
 # Zalo giới hạn số tin bot được gửi -> tự giới hạn để không bị khóa ("vượt quá hạn mức gửi tin nhắn")
-ZALO_MAX_PER_HOUR = _int("ZALO_MAX_PER_HOUR", 12)
-ZALO_MAX_PER_DAY = _int("ZALO_MAX_PER_DAY", 100)
+ZALO_MAX_PER_HOUR = _int("ZALO_MAX_PER_HOUR", 30)
+ZALO_MAX_PER_DAY = _int("ZALO_MAX_PER_DAY", 300)
 ZALO_PAUSE_MIN = _int("ZALO_PAUSE_MIN", 120)  # Zalo báo vượt hạn mức -> ngừng gửi N phút
 
 # ---------- LLM ----------
@@ -98,19 +105,19 @@ HYST_LIGHT_RATIO = _float("HYST_LIGHT_RATIO", 0.1)
 # ---------- Cảnh báo ----------
 NOTIFY_DEVICE_CHANGES = _bool("NOTIFY_DEVICE_CHANGES", True)
 NOTIFY_MANUAL_CHANGES = _bool("NOTIFY_MANUAL_CHANGES", True)
-DEVICE_NOTIFY_MIN = _float("DEVICE_NOTIFY_MIN", 5)  # mỗi thiết bị báo Zalo tối đa 1 lần / N phút
+# Báo MỌI lần bật/tắt thiết bị; các thay đổi trong N giây gom thành 1 tin (đỡ tốn hạn mức tin Zalo)
+DEVICE_BATCH_SEC = _int("DEVICE_BATCH_SEC", 60)
 ALERT_REPEAT_MIN = _float("ALERT_REPEAT_MIN", 30)
 DAILY_REPORT_HOUR = _int("DAILY_REPORT_HOUR", 7)  # -1 để tắt
 PERIODIC_REPORT_SEC = _int("PERIODIC_REPORT_SEC", 3600)  # gửi tình trạng định kỳ qua Zalo, 0 = tắt
 if 0 < PERIODIC_REPORT_SEC < 600:  # 15 giây/lần làm bot hết hạn mức tin nhắn trong vài giờ
     PERIODIC_REPORT_SEC = 600
-PERIODIC_AI_MIN = _float("PERIODIC_AI_MIN", 5)  # nhận định AI trong tin định kỳ viết lại sau N phút
 HISTORY_RETENTION_DAYS = _int("HISTORY_RETENTION_DAYS", 30)
 
-# ---------- Bật sớm theo dự báo (cần firmware có PRE) ----------
-PREDICTIVE_ENABLED = _bool("PREDICTIVE_ENABLED", True)
-PREDICT_LEAD_MIN = _float("PREDICT_LEAD_MIN", 3)      # xin bật khi dự báo còn <= N phút nữa chạm ngưỡng
-PREDICT_MIN_R2 = _float("PREDICT_MIN_R2", 0.5)        # độ tin cậy xu hướng tối thiểu
-PREDICT_MAX_ON_MIN = _float("PREDICT_MAX_ON_MIN", 10)  # bật sớm tối đa N phút nếu vẫn chưa chạm ngưỡng
+# ---------- Thời tiết ngoài trời (Open-Meteo) cho phân tích Random Forest ----------
+# Để trống = tự đoán vị trí theo IP mạng của máy chạy máy chủ
+WEATHER_LAT = _opt_float("WEATHER_LAT")
+WEATHER_LON = _opt_float("WEATHER_LON")
+WEATHER_NAME = _str("WEATHER_NAME")
 
 DB_PATH = SERVER_DIR / "data" / "greenhouse.db"

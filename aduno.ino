@@ -93,15 +93,6 @@ float SET_T = 0;
 // ================= MODE =================
 int MODE = 1;   // 0 = manual, 1 = auto
 
-// ================= BAT SOM THEO DU BAO (may chu AI) =================
-// May chu AI ghi PRE = {BOM, DEN, QUAT, SUONG, MO, SEQ} khi du bao sap cham nguong.
-// AUTO: thiet bi bat khi vuot nguong HOAC co yeu cau bat som; khoa an toan (pH, do man) van uu tien.
-// SEQ tang moi lan may chu ghi; SEQ dung yen qua 60 giay (may chu tat/mat mang) -> bo qua yeu cau.
-int PRE_BOM = 0, PRE_DEN = 0, PRE_QUAT = 0, PRE_SUONG = 0, PRE_MO = 0;
-long preSeq = -1;
-unsigned long preSeenAt = 0;
-const unsigned long PRE_TIMEOUT = 60000;
-
 // ================= OUTPUT =================
 #define DEN_PIN   19
 #define BOM_PIN   2
@@ -272,20 +263,6 @@ bool readSetValues() {
   if (!doc["DONG"].isNull())  DONG  = doc["DONG"].as<int>();
   }
 
-  JsonObject pre = doc["PRE"];
-  if (!pre.isNull()) {
-    long seq = pre["SEQ"] | -1L;
-    if (seq != preSeq) {  // may chu vua ghi yeu cau moi
-      preSeq = seq;
-      preSeenAt = millis();
-    }
-    PRE_BOM   = pre["BOM"]   | 0;
-    PRE_DEN   = pre["DEN"]   | 0;
-    PRE_QUAT  = pre["QUAT"]  | 0;
-    PRE_SUONG = pre["SUONG"] | 0;
-    PRE_MO    = pre["MO"]    | 0;
-  }
-
   return true;
 }
 
@@ -311,8 +288,6 @@ bool sendToFirebase(bool includeDevices) {
   // Nhip tim: Firebase tu dien gio server -> web biet ESP32 con ket noi hay khong
   JsonObject espTs = doc.createNestedObject("ESP_TS");
   espTs[".sv"] = "timestamp";
-  // Bao lai SEQ yeu cau bat som da nhan -> web biet firmware ho tro bat som
-  doc["PRE_ACK"] = preSeq;
   // Chan doan: thoi gian chay (giay), ly do khoi dong lan truoc (vd sut_ap), song WiFi (dBm)
   doc["ESP_UP"]   = millis() / 1000;
   doc["ESP_RST"]  = resetReasonText();
@@ -687,28 +662,25 @@ bool setOutput(int idx, int pin, int &state, int want, bool force) {
 void autoMode() {
   autoAudioEnabled = true;
 
-  // Yeu cau bat som con hieu luc khi may chu van cap nhat trong 60 giay gan nhat
-  bool pre = preSeq >= 0 && (millis() - preSeenAt) < PRE_TIMEOUT;
-
-  // ===== DIEU KHIEN THIET BI (co vung tre: giua 2 muc thi giu nguyen trang thai) =====
+  // ===== DIEU KHIEN THIET BI THEO NGUONG (co vung tre: giua 2 muc thi giu nguyen trang thai) =====
   int wantDEN = DEN;
-  if (ANHSANG < SET_AS || (pre && PRE_DEN)) wantDEN = 1;
+  if (ANHSANG < SET_AS) wantDEN = 1;
   else if (ANHSANG > SET_AS + HYST_LIGHT) wantDEN = 0;
 
   int wantMO = MO;
-  if (ANHSANG <= SET_AS || (pre && PRE_MO)) wantMO = 1;  // toi / sap toi -> mo man che
+  if (ANHSANG <= SET_AS) wantMO = 1;  // toi -> mo man che
   else if (ANHSANG > SET_AS + HYST_LIGHT) wantMO = 0;
 
   int wantQUAT = QUAT;
-  if (t > SET_T || (pre && PRE_QUAT)) wantQUAT = 1;
+  if (t > SET_T) wantQUAT = 1;
   else if (t < SET_T - HYST_T) wantQUAT = 0;
 
   int wantSUONG = SUONG;
-  if (h < SET_H || (pre && PRE_SUONG)) wantSUONG = 1;
+  if (h < SET_H) wantSUONG = 1;
   else if (h >= min(SET_H + HYST_H, 100.0f)) wantSUONG = 0;
 
   int wantBOM = BOM;
-  if (GT_AMDAT < SET_AMDAT || (pre && PRE_BOM)) wantBOM = 1;
+  if (GT_AMDAT < SET_AMDAT) wantBOM = 1;
   else if (GT_AMDAT >= min(SET_AMDAT + HYST_SOIL, 100.0f)) wantBOM = 0;
 
   // Khoa an toan: nuoc man -> khong bom; pH ngoai nguong -> khong bom, khong phun suong (tat ngay)

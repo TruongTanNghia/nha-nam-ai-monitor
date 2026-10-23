@@ -55,10 +55,10 @@ Nạp firmware: sao chép `secrets.example.h` thành `secrets.h` (cùng thư m�
 
 | Phần | Nội dung |
 |---|---|
-| **Tổng quan** | Trạng thái kết nối ESP32 (đã kết nối / chậm / mất kết nối + từ bao giờ), **2 chỉ số riêng: Môi trường nhà nấm và Nước cấp**, nhận định AI, 6 thẻ cảm biến (đồng hồ + ngưỡng + xu hướng), trạng thái thiết bị, vấn đề & lịch sử bật/tắt |
+| **Tổng quan** | Trạng thái kết nối ESP32 (đã kết nối / chậm / mất kết nối + từ bao giờ), **2 chỉ số riêng: Môi trường nhà nấm và Nước cấp**, nhận định AI, **thời tiết ngoài trời + Random Forest dự đoán 1–3 giờ tới (tham khảo)**, 6 thẻ cảm biến (đồng hồ + ngưỡng), trạng thái thiết bị, vấn đề & lịch sử bật/tắt |
 | **Điều khiển** | Công tắc thiết bị, màn che, cài ngưỡng (có đơn vị & giải thích) |
 | **Biểu đồ** | Trực tiếp / 1h / 6h / 24h / 7 ngày, đường ngưỡng, thấp–TB–cao |
-| **Phân tích AI** | Danh sách vấn đề, dự báo 30 phút, trạng thái model ML, báo cáo AI, chat hỏi đáp |
+| **Phân tích AI** | Danh sách vấn đề, thời tiết ngoài trời 3 giờ tới, mô hình Random Forest (sai số, yếu tố ảnh hưởng), báo cáo AI, chat hỏi đáp |
 | **Cảnh báo** | Lịch sử cảnh báo (lọc mức độ), trạng thái Zalo, gửi tin thử, tạm tắt thông báo |
 
 ### Hai chỉ số (server/indices.py)
@@ -72,23 +72,24 @@ pH và độ mặn **không trung bình hóa** với nhiệt độ hay ánh sán
 ### Phân tích (server/analyzer.py)
 - **Luật chuyên gia**: vượt ngưỡng kéo dài > 2 phút (tránh báo nhầm do nhiễu), cảm biến lỗi/phi lý, nhiễu (giật số), báo 0 liên tục, đứng yên (ESP32 mất kết nối).
 - **Thiết bị**: bơm chạy 8 phút mà đất không ẩm lên, quạt 15 phút không hạ nhiệt, phun sương không tăng ẩm, đèn bật không sáng hơn, màn che nhận cả MỞ & ĐÓNG, bật/tắt liên tục (≥ 6 lần/10 phút), bơm/phun sương chạy quá lâu.
-- **Model ML – IsolationForest**: học 24h dữ liệu (tự huấn luyện lại mỗi 30 phút), phát hiện tổ hợp chỉ số bất thường và chỉ ra cảm biến lệch nhiều nhất.
-- **Dự báo thiết bị** (`server/forecast.py`): từ tốc độ thay đổi trong vài phút gần nhất (cần ~1 phút dữ liệu), tính bao lâu nữa chạm ngưỡng và ESP32 sẽ làm gì — vd *“khoảng 4 phút nữa độ ẩm không khí xuống dưới 60% → ESP32 sẽ bật phun sương”*, hoặc khi nào chỉ số trở lại để tắt thiết bị. Hiện trên trang Tổng quan, tab Phân tích, tin Zalo định kỳ và lệnh `/phantich`. Cảm biến chưa cài ngưỡng (giá trị 0) thì chưa dự báo được thiết bị.
 
-### Bật thiết bị sớm theo dự báo (server/preemptive.py)
-Ở chế độ AUTO, khi dự báo còn ≤ `PREDICT_LEAD_MIN` phút (mặc định 3) nữa chỉ số chạm ngưỡng, máy chủ ghi yêu cầu `PRE` lên Firebase để ESP32 **bật sớm** quạt, phun sương, máy bơm, đèn và **mở màn che sớm** khi trời sắp tối. Khóa an toàn của firmware (pH lệch, nước mặn) vẫn thắng; máy chủ tắt/mất mạng thì yêu cầu tự hết hạn sau 60 giây. Bật/tắt bằng công tắc ở tab **Điều khiển**. Cần firmware có hỗ trợ `PRE` — xem [docs/FIRMWARE_CAP_NHAT.md](docs/FIRMWARE_CAP_NHAT.md).
+### Random Forest + thời tiết ngoài trời (server/rf_model.py, server/weather.py) — CHỈ THAM KHẢO
+**Thiết bị luôn bật/tắt theo ngưỡng** cài trên web (firmware ESP32); phần này không điều khiển gì.
+- **Thời tiết**: lấy từ [Open-Meteo](https://open-meteo.com) (miễn phí, không cần key) 15 phút/lần — nhiệt độ, độ ẩm, mây, bức xạ mặt trời, mưa, gió (31 ngày qua + 2 ngày tới). Vị trí theo `WEATHER_LAT`/`WEATHER_LON`, để trống thì đoán theo IP mạng.
+- **Một mô hình Random Forest** (200 cây, scikit-learn) học từ dữ liệu theo giờ: chỉ số trong nhà + thiết bị đang chạy + thời tiết giờ này và giờ tới + giờ trong ngày → nhiệt độ, độ ẩm không khí, độ ẩm đất **giờ tới**. Lặp 3 bước để dự đoán **1–3 giờ tới**. Học lại mỗi giờ; cần ≥ 24 giờ dữ liệu (máy chủ chạy ít nhất ~1 ngày). Web hiện sai số trung bình và các yếu tố ảnh hưởng nhiều nhất.
+- Kết quả hiện ở trang Tổng quan, tab Phân tích AI, tin Zalo định kỳ và lệnh `/phantich` — kèm gợi ý (vd *“Độ ẩm không khí có thể xuống ~62% trong 2 giờ tới — phun sương sẽ bật theo ngưỡng”*).
 
 ### Máy chủ AI và chế độ AUTO
-Mặc định máy chủ AI **chỉ giám sát**: khi ESP32 tự bật/tắt thiết bị, máy chủ báo Zalo kèm lý do (vd “BẬT máy bơm — độ ẩm đất 32% < ngưỡng 40%”), tối đa 1 lần / `DEVICE_NOTIFY_MIN` phút mỗi thiết bị, và cảnh báo khi thiết bị bật/tắt liên tục hoặc bơm chạy quá lâu.
+Mặc định máy chủ AI **chỉ giám sát**: **mọi lần** thiết bị bật/tắt (ESP32 tự động hoặc bấm trên web) đều báo Zalo kèm giờ và lý do (vd “14:05:12 BẬT máy bơm — ESP32 tự động: độ ẩm đất 32% < ngưỡng 40%”), các lần trong `DEVICE_BATCH_SEC` giây gom thành 1 tin, và cảnh báo khi thiết bị bật/tắt liên tục hoặc bơm chạy quá lâu.
 
 Nếu dùng firmware **không** tự điều khiển, đặt `AUTO_CONTROL_ENABLED=true` để máy chủ điều khiển thay (cùng luật với firmware, thêm vùng trễ, ngắt bảo vệ bơm/phun sương sau `PUMP_MAX_ON_MIN`/`MIST_MAX_ON_MIN` phút, tắt thiết bị khi cảm biến lỗi). Không bật cùng lúc với firmware tự điều khiển — hai bên sẽ ghi đè nhau.
 
 ### Zalo
-Tự gửi: **tình trạng định kỳ mỗi `PERIODIC_REPORT_SEC` giây** (mặc định 1 giờ, tối thiểu 10 phút) kèm nhận định AI (AI viết lại mỗi `PERIODIC_AI_MIN` phút hoặc khi có vấn đề mới, để không vượt hạn mức LLM), cảnh báo mới (kèm “Nhận định AI” nếu có LLM), nhắc lại sau `ALERT_REPEAT_MIN` phút nếu chưa xử lý, báo khi đã ổn định, mỗi lần tự bật/tắt thiết bị, khi có người điều khiển từ web, mất kết nối Firebase, báo cáo buổi sáng lúc `DAILY_REPORT_HOUR`.
+Tự gửi: **tình trạng định kỳ mỗi `PERIODIC_REPORT_SEC` giây** (mặc định 1 giờ, tối thiểu 10 phút) kèm thời tiết ngoài trời và kết quả Random Forest (tham khảo), cảnh báo mới (kèm “Nhận định AI” nếu có LLM), nhắc lại sau `ALERT_REPEAT_MIN` phút nếu chưa xử lý, báo khi đã ổn định, mọi lần bật/tắt thiết bị, **mạch ESP32 tắt / mất kết nối (sau 60 giây) và khi hoạt động lại** (kèm lý do khởi động: mất điện, sụt áp…, ưu tiên cao), mất kết nối Firebase, báo cáo buổi sáng lúc `DAILY_REPORT_HOUR`.
 
-**Hạn mức tin:** Zalo khóa bot gửi quá nhiều (“vượt quá hạn mức gửi tin nhắn”), nên máy chủ tự giới hạn `ZALO_MAX_PER_HOUR` (12) / `ZALO_MAX_PER_DAY` (100) tin; báo cáo định kỳ và thông báo bật/tắt dừng trước để dành chỗ cho cảnh báo; Zalo báo vượt hạn mức thì ngừng gửi `ZALO_PAUSE_MIN` phút. Tab Cảnh báo hiện số tin đã dùng.
+**Hạn mức tin:** Zalo khóa bot gửi quá nhiều (“vượt quá hạn mức gửi tin nhắn”), nên máy chủ tự giới hạn `ZALO_MAX_PER_HOUR` (30) / `ZALO_MAX_PER_DAY` (300) tin; báo cáo định kỳ dừng trước để dành chỗ cho cảnh báo; Zalo báo vượt hạn mức thì ngừng gửi `ZALO_PAUSE_MIN` phút. **Gửi lỗi do mạng** thì tự thử lại 3 lần, vẫn lỗi thì giữ tin và gửi bù khi có mạng (ghi “gửi chậm N phút”). Tab Cảnh báo hiện số tin đã dùng.
 
-Lệnh (chỉ chat có trong `ZALO_CHAT_IDS`): `/trangthai` `/phantich` `/baocao` `/canhbao` `/auto` `/manual` `/bat quat` `/tat bom` `/tat het` `/mo man` `/dong man` `/im 60` `/batthongbao` `chatid` — hoặc hỏi tự do, AI trả lời dựa trên số liệu.
+Lệnh (chỉ chat có trong `ZALO_CHAT_IDS`): `/trangthai` `/phantich` `/thoitiet` `/baocao` `/canhbao` `/auto` `/manual` `/bat quat` `/tat bom` `/tat het` `/mo man` `/dong man` `/im 60` `/batthongbao` `chatid` — hoặc hỏi tự do, AI trả lời dựa trên số liệu.
 
 ### LLM (server/llm.py)
 | Nhà cung cấp | Cấu hình `.env` |
@@ -107,7 +108,8 @@ index.html, style.css, app.js   Web (Firebase realtime, điều khiển)
 js/                             Module web: cảm biến, biểu đồ, kết nối máy chủ AI
 server/app.py                   Flask: phục vụ web + API
 server/engine.py                Vòng lặp chính: đọc → lưu → điều khiển → phân tích → cảnh báo
-server/analyzer.py              Luật chuyên gia, IsolationForest, dự báo
+server/analyzer.py              Luật chuyên gia (ngưỡng, cảm biến, thiết bị, nguồn ESP32)
+server/rf_model.py, weather.py  Random Forest + thời tiết Open-Meteo (tham khảo)
 server/controller.py            Tự động điều khiển an toàn
 server/commands.py, zalo_bot.py Zalo Bot: gửi tin & nhận lệnh
 server/llm.py                   Kết nối LLM

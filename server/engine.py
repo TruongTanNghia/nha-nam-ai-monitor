@@ -1,4 +1,7 @@
-"""Vòng lặp chính: đọc Firebase -> lưu lịch sử -> tự điều khiển -> phân tích -> cảnh báo Zalo."""
+"""Vòng lặp chính: đọc Firebase -> lưu lịch sử -> phân tích -> cảnh báo Zalo.
+
+Thiết bị bật/tắt theo NGƯỠNG (firmware ESP32). Random Forest + thời tiết ngoài trời chỉ để tham khảo.
+"""
 import datetime as dt
 import logging
 import threading
@@ -11,21 +14,45 @@ import indices
 import llm
 from analyzer import SEV_RANK, Analyzer
 from controller import AutoController, explain_auto
-from preemptive import NAMES as PRE_NAMES, Preemptive
 from firebase_client import Firebase
-from forecast import sentence, upcoming
+from rf_model import RFAnalyzer, report_lines
 from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, RESET_REASONS, SENSOR_KEYS, SENSORS, fmt, num, thresholds
 from storage import Storage
+from weather import Weather
 from zalo_bot import ZaloBot
 
 log = logging.getLogger("engine")
 
 ICONS = {"t": "🌡", "h": "💧", "ANHSANG": "☀️", "GT_AMDAT": "🌱", "GT_DOMAN": "🧂", "GT_PH": "⚗️"}
 SEV_ICON = {"critical": "🚨", "warning": "⚠️", "info": "ℹ️"}
+SOURCE_TEXT = {
+    "esp_auto": "🤖 ESP32 tự động",
+    "external": "👤 bấm trên web",
+    "auto": "🤖 máy chủ AI",
+    "zalo": "📱 lệnh Zalo",
+}
+LINK_KEYS = ("stale_all", "esp_offline")  # mất kết nối ESP32: đã có tin riêng (_check_esp_link)
+ESP_OFFLINE_SEC = 60       # nhịp tim ESP_TS đứng yên 60 giây -> coi là mạch tắt / mất kết nối
+ESP_STALE_SEC = 300        # firmware cũ (không có ESP_TS): số liệu đứng yên 5 phút
+WEATHER_EVERY = 900        # cập nhật thời tiết 15 phút/lần
+RF_EVERY = 600             # chạy lại Random Forest 10 phút/lần
 
 
 def now_text(ts=None):
     return dt.datetime.fromtimestamp(ts or time.time()).strftime("%H:%M %d/%m/%Y")
+
+
+def clock(ts):
+    return dt.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+
+
+def duration_text(sec):
+    m = int(sec // 60)
+    if m < 1:
+        return f"{int(sec)} giây"
+    if m < 90:
+        return f"{m} phút"
+    return f"{m // 60} giờ {m % 60} phút" if m < 2880 else f"{m // 1440} ngày"
 
 
 def device_text(dev, value):
@@ -40,7 +67,8 @@ class Engine:
         self.store = Storage()
         self.analyzer = Analyzer()
         self.ctrl = AutoController()
-        self.pre = Preemptive()
+        self.weather = Weather(self.store)
+        self.rf = RFAnalyzer(self.store, self.weather)
         self.zalo = ZaloBot()
         self.outbox = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outbox")
         self.lock = threading.RLock()
@@ -56,19 +84,24 @@ class Engine:
         self.fail_count = 0
         self.offline_alerted = False
         self.last_ok_ts = None
-        self.device_notified = {}  # thiết bị -> lần báo Zalo gần nhất
+        self.dev_batch = []           # các lần bật/tắt chờ gom thành 1 tin Zalo
+        self.dev_msg_times = deque()  # lúc gửi các tin bật/tắt (giãn tin khi thiết bị đảo liên tục)
         self.last_prune = 0
         self.last_daily = None
         self.mute_until = 0
         self.last_periodic = 0
         self.periodic_busy = False
-        self.periodic_ai_text = None
-        self.periodic_ai_ts = 0
-        self.periodic_ai_keys = frozenset()
         self.started_at = time.time()
         self.running = False
-        self.hw_last_change = None
-        self.esp_up_prev = None  # ESP_UP lần đọc trước, để phát hiện ESP32 khởi động lại  # lần cuối số liệu cảm biến thay đổi -> ESP32 còn gửi
+        self.hw_last_change = None    # lần cuối số liệu cảm biến thay đổi -> ESP32 còn gửi
+        self.esp_up_prev = None       # ESP_UP lần đọc trước, để phát hiện ESP32 khởi động lại
+        self.esp_ts_prev = None       # ESP_TS lần đọc trước
+        self.esp_ts_seen = None       # lúc (đồng hồ máy chủ) thấy ESP_TS đổi gần nhất
+        self.esp_online = None        # None = chưa biết
+        self.esp_offline_since = None
+        self.esp_restart_reason = None  # lý do khởi động lại vừa phát hiện, báo kèm tin "hoạt động lại"
+        self.last_weather = 0
+        self.last_rf = 0
 
     # ------------------------------------------------------------------ setup
     def start(self):
@@ -77,13 +110,15 @@ class Engine:
         for row in self.store.readings_since(since):
             self.recent.append(row)
         history = self.store.readings_since(time.time() - 3 * 86400)
-        self.analyzer.maybe_train([r for r in history if r["ts"] >= time.time() - 86400], time.time())
         # Lần cuối số liệu cảm biến còn thay đổi (để báo ESP32 mất kết nối từ khi nào, kể cả sau khi khởi động lại)
         for a, b in zip(history, history[1:]):
             if any(a.get(k) != b.get(k) for k in SENSOR_KEYS):
                 self.hw_last_change = b["ts"]
+        # Bỏ yêu cầu "bật sớm theo dự báo" của bản cũ: thiết bị chỉ chạy theo ngưỡng
+        self.fb.update({"PRE": None, "AI_PREDICT": None, "PRE_ACK": None})
         self.running = True
         threading.Thread(target=self._loop, name="engine", daemon=True).start()
+        threading.Thread(target=self._background, name="weather-rf", daemon=True).start()
         if config.ZALO_COMMANDS_ENABLED and self.zalo.token:
             from commands import CommandHandler
             handler = CommandHandler(self)
@@ -102,6 +137,24 @@ class Engine:
             except Exception:  # không để 1 lỗi làm dừng cả hệ thống
                 log.exception("Lỗi trong vòng lặp")
             time.sleep(max(0.5, config.POLL_INTERVAL_SEC - (time.time() - started)))
+
+    def _background(self):
+        """Thời tiết (15 phút/lần) + Random Forest (10 phút/lần): chạy riêng để không làm chậm vòng đọc cảm biến."""
+        while self.running:
+            now = time.time()
+            try:
+                if now - self.last_weather >= (WEATHER_EVERY if self.weather.updated else 120):
+                    self.last_weather = now
+                    if self.weather.refresh() and self.rf.result is None:
+                        self.last_rf = 0  # có thời tiết lần đầu -> phân tích ngay
+                if now - self.last_rf >= RF_EVERY and self.latest_data:
+                    self.last_rf = now
+                    with self.lock:
+                        rows, data = list(self.recent), dict(self.latest_data)
+                    self.rf.analyze(rows, data, now)
+            except Exception:
+                log.exception("Lỗi phân tích thời tiết / Random Forest")
+            time.sleep(20)
 
     # ------------------------------------------------------------------- tick
     def tick(self):
@@ -126,6 +179,7 @@ class Engine:
         if prev is not None and any(prev.get(k) != values.get(k) for k in SENSOR_KEYS):
             self.hw_last_change = now
         self._track_esp_restart(data, now)
+        self._check_esp_link(data, now)
 
         with self.lock:
             self.latest_data, self.latest_values = data, values
@@ -133,17 +187,13 @@ class Engine:
             self._detect_external_changes(values, now)
             self.prev_values = values
 
-        # Tự động điều khiển
+        # Máy chủ tự điều khiển (mặc định tắt — ESP32 điều khiển theo ngưỡng)
         updates, changes, safety_events = self.ctrl.step(data, now)
         if updates and self.fb.update(updates):
-            lines = []
             for ch in changes:
                 self.our_writes[ch["device"]] = (ch["value"], now, "auto")
                 self.store.add_device_event(now, ch["device"], ch["value"], "auto", ch["reason"])
-            for ch in self._merge_door(changes):
-                lines.append(f"• {device_text(ch['device'], ch['value'])} — {ch['reason']}")
-            if lines and config.NOTIFY_DEVICE_CHANGES:
-                self.notify("🤖 Máy chủ AI tự động điều khiển:\n" + "\n".join(lines), important=False)
+                self._queue_device(now, ch["device"], ch["value"], "auto", ch["reason"])
 
         # Phân tích + cảnh báo
         with self.lock:
@@ -153,19 +203,19 @@ class Engine:
         with self.lock:
             self.analysis = analysis
         self._process_findings(analysis["findings"], safety_events, now)
-        self._predictive(data, analysis, now)
+        self._flush_devices(now)
 
         self._housekeeping(now)
 
     @staticmethod
     def _merge_door(changes):
         """MO và DONG đổi cùng lúc -> chỉ báo 1 dòng."""
-        out, door_done = [], False
+        out, door_ts = [], set()
         for ch in changes:
             if ch["device"] in ("MO", "DONG"):
-                if door_done:
+                if ch.get("ts") in door_ts:
                     continue
-                door_done = True
+                door_ts.add(ch.get("ts"))
                 if ch["device"] == "DONG":
                     ch = {**ch, "device": "MO", "value": 1 - ch["value"]}
             out.append(ch)
@@ -175,21 +225,17 @@ class Engine:
         """Thiết bị/chế độ đổi mà không do server ghi.
 
         AUTO: firmware ESP32 tự bật/tắt theo ngưỡng -> báo kèm lý do.
-        MANUAL: có người điều khiển từ web.
+        MANUAL: có người bấm trên web.
         """
         prev = self.prev_values
         if prev is None:
             return
-        parts = []
         if values["MODE"] != prev["MODE"]:
-            mode = "AUTO 🤖" if values["MODE"] == MODE_AUTO else "MANUAL ✋"
             self.store.add_device_event(now, "MODE", values["MODE"], "external", "")
-            if config.NOTIFY_MANUAL_CHANGES:
-                parts.append(f"⚙️ Chế độ chuyển sang {mode}")
+            self._queue_device(now, "MODE", values["MODE"], "external", "")
 
         auto = values["MODE"] == MODE_AUTO
         source = "esp_auto" if auto else "external"
-        changed = []
         for dev in DEVICE_KEYS:
             if values[dev] == prev[dev]:
                 continue
@@ -198,24 +244,107 @@ class Engine:
                 self.our_writes.pop(dev, None)
                 continue  # do server/Zalo vừa ghi, đã ghi nhận
             reason = explain_auto(dev, values[dev], self.latest_data) if auto else ""
-            if auto and values[dev] == 1 and dev in self.pre.active:
-                reason = "bật sớm theo dự báo AI — " + self.pre.active[dev]["reason"]
             self.store.add_device_event(now, dev, values[dev], source, reason)
-            changed.append({"device": dev, "value": values[dev], "reason": reason})
+            self._queue_device(now, dev, values[dev], source, reason)
 
-        # ESP32 không có vùng trễ -> thiết bị có thể đảo liên tục: mỗi thiết bị chỉ báo 1 lần / N phút
+    # ------------------------------------------------- báo bật/tắt thiết bị
+    def _queue_device(self, ts, device, value, source, reason):
+        if source == "zalo":
+            return  # lệnh Zalo đã được trả lời ngay trong khung chat
+        notify = config.NOTIFY_DEVICE_CHANGES if source in ("esp_auto", "auto") else config.NOTIFY_MANUAL_CHANGES
+        if notify:
+            self.dev_batch.append({"ts": ts, "device": device, "value": value, "source": source, "reason": reason})
+
+    def _flush_devices(self, now):
+        """Báo MỌI lần bật/tắt: gom các thay đổi trong DEVICE_BATCH_SEC giây thành 1 tin.
+        Thiết bị đảo liên tục (đã gửi >= 10 tin/giờ) thì giãn thành 5 phút/tin để không hết hạn mức Zalo."""
+        if not self.dev_batch:
+            return
+        while self.dev_msg_times and self.dev_msg_times[0] < now - 3600:
+            self.dev_msg_times.popleft()
+        wait = config.DEVICE_BATCH_SEC * (5 if len(self.dev_msg_times) >= 10 else 1)
+        if now - self.dev_batch[0]["ts"] < wait:
+            return
+        batch, self.dev_batch = self.dev_batch, []
+        self.dev_msg_times.append(now)
         lines = []
-        for ch in self._merge_door(changed):
-            key = "MO" if ch["device"] in ("MO", "DONG") else ch["device"]
-            if now - self.device_notified.get(key, 0) < config.DEVICE_NOTIFY_MIN * 60:
-                continue
-            self.device_notified[key] = now
-            lines.append(f"• {device_text(ch['device'], ch['value'])}" + (f" — {ch['reason']}" if ch["reason"] else ""))
-        if lines and (config.NOTIFY_DEVICE_CHANGES if auto else config.NOTIFY_MANUAL_CHANGES):
-            title = "🤖 ESP32 tự động điều khiển:" if auto else "👤 Điều khiển thủ công từ web:"
-            parts.append(title + "\n" + "\n".join(lines))
-        if parts:
-            self.notify("\n".join(parts), important=False)
+        for ch in self._merge_door(batch):
+            if ch["device"] == "MODE":
+                text = f"⚙️ Chuyển chế độ {'AUTO 🤖' if ch['value'] == MODE_AUTO else 'MANUAL ✋'}"
+            else:
+                text = device_text(ch["device"], ch["value"])
+            src = SOURCE_TEXT.get(ch["source"], ch["source"])
+            lines.append(f"• {clock(ch['ts'])} {text} — {src}" + (f": {ch['reason']}" if ch["reason"] else ""))
+        shown = lines[:15]
+        if len(lines) > 15:
+            shown.append(f"… và {len(lines) - 15} lần bật/tắt khác")
+        title = "🔧 THIẾT BỊ BẬT/TẮT" + (f" ({len(lines)} lần)" if len(lines) > 1 else "")
+        self.notify(title + "\n" + "\n".join(shown), important=True)
+
+    # ------------------------------------------------- mạch ESP32 tắt / mở lại
+    def _check_esp_link(self, data, now):
+        """Báo Zalo NGAY khi mạch ESP32 tắt/mất kết nối và khi hoạt động lại (ưu tiên cao)."""
+        esp_ts = num(data.get("ESP_TS"))
+        if esp_ts:  # firmware có nhịp tim (2 giây/lần)
+            # Quyết định theo lúc ESP_TS thay đổi (đồng hồ máy chủ) -> không bị lệch giờ giữa máy và Firebase.
+            # Lần đọc đầu chưa biết: coi như vừa thấy, sau 60 giây không đổi mới là mất kết nối.
+            if esp_ts != self.esp_ts_prev:
+                self.esp_ts_prev, self.esp_ts_seen = esp_ts, now
+            online = now - self.esp_ts_seen <= ESP_OFFLINE_SEC
+            last_seen = esp_ts / 1000  # giờ Firebase của lần gửi cuối, chỉ để hiển thị
+        elif self.hw_last_change:  # firmware cũ: dựa vào số liệu còn thay đổi
+            last_seen = self.hw_last_change
+            online = now - last_seen <= ESP_STALE_SEC
+        else:
+            return
+        was = self.esp_online
+        self.esp_online = online
+        if was is None:  # lần đầu sau khi máy chủ khởi động
+            if not online:
+                self.esp_offline_since = last_seen
+                self.store.add_device_event(now, "ESP_LINK", 0, "esp", "mất kết nối")
+                self.notify(f"🔴 MẠCH ESP32 ĐANG TẮT / MẤT KẾT NỐI\nLần cuối nhận dữ liệu: {now_text(last_seen)}.\n"
+                            "Kiểm tra nguồn điện và WiFi của bo mạch.", priority="high")
+            return
+        if was and not online:
+            self.esp_offline_since = last_seen
+            self.store.add_device_event(now, "ESP_LINK", 0, "esp", "mất kết nối")
+            log.warning("ESP32 mất kết nối (lần cuối %s)", now_text(last_seen))
+            long_ago = now - last_seen > 600  # máy chủ vừa bật lên mà ESP32 đã tắt từ trước
+            self.notify(f"🔴 MẠCH ESP32 {'ĐANG' if long_ago else 'VỪA'} TẮT / MẤT KẾT NỐI\n"
+                        f"Lần cuối nhận dữ liệu: {now_text(last_seen) if long_ago else clock(last_seen)}.\n"
+                        "Có thể mất điện, mất WiFi hoặc bo mạch bị treo. Trong lúc này nhà nấm không được tự động "
+                        "điều khiển.", priority="high")
+        elif online and not was:
+            # cùng một đồng hồ (Firebase hoặc máy chủ) cho cả 2 mốc
+            off = last_seen - self.esp_offline_since if self.esp_offline_since else None
+            self.store.add_device_event(now, "ESP_LINK", 1, "esp", "hoạt động lại")
+            log.info("ESP32 hoạt động lại")
+            reason = self.esp_restart_reason
+            self.esp_restart_reason = None
+            self.notify("🟢 MẠCH ESP32 ĐÃ HOẠT ĐỘNG LẠI"
+                        + (f"\nĐã mất kết nối khoảng {duration_text(off)}." if off else "")
+                        + (f"\nLý do khởi động: {reason}." if reason else "")
+                        + "\n" + self.readings_line(data), priority="high")
+            self.esp_offline_since = None
+
+    def _track_esp_restart(self, data, now):
+        """ESP_UP (giây chạy liên tục) giảm -> ESP32 vừa khởi động lại; ghi lại kèm lý do và báo Zalo."""
+        up = num(data.get("ESP_UP"))
+        if up is None:
+            return
+        prev, self.esp_up_prev = self.esp_up_prev, up
+        if prev is None or up >= prev:
+            return
+        reason = RESET_REASONS.get(data.get("ESP_RST"), "không rõ")
+        self.store.add_device_event(now, "ESP_RESTART", 1, "esp", reason)
+        log.warning("ESP32 khởi động lại: %s", reason)
+        if self.esp_online is False:
+            self.esp_restart_reason = reason  # báo chung trong tin "đã hoạt động lại"
+            return
+        # Mất điện chớp nhoáng (chưa kịp bị coi là mất kết nối) -> vẫn báo
+        self.notify(f"🔄 MẠCH ESP32 VỪA KHỞI ĐỘNG LẠI — lý do: {reason}.\n"
+                    "Nếu lặp lại nhiều lần: kiểm tra nguồn điện cấp cho bo mạch và rơ-le.", priority="high")
 
     # ----------------------------------------------------------------- alerts
     def _process_findings(self, findings, events, now):
@@ -235,8 +364,8 @@ class Engine:
                         self.store.update_alert(a["id"], f)
                     a["finding"] = f
 
-                if SEV_RANK[f["severity"]] < 2:
-                    continue  # info: chỉ hiện trên web
+                if SEV_RANK[f["severity"]] < 2 or f["key"] in LINK_KEYS:
+                    continue  # info: chỉ hiện trên web; mất kết nối ESP32 đã báo riêng
                 escalated = a["sent_sev"] is not None and SEV_RANK[f["severity"]] > SEV_RANK[a["sent_sev"]]
                 repeat_due = a["sent_sev"] is not None and now - a["last_sent"] >= config.ALERT_REPEAT_MIN * 60
                 if a["sent_sev"] is None or escalated or repeat_due:
@@ -305,17 +434,33 @@ class Engine:
 
     def notify(self, text, important=True, priority=None):
         """Gửi tin thông thường (không chặn vòng lặp). important=False -> ưu tiên thấp, dừng sớm khi gần hết hạn mức."""
-        if not important and time.time() < self.mute_until:
+        if priority != "high" and time.time() < self.mute_until:
             return
         self.outbox.submit(self.zalo.send, f"{text}\n🕒 {now_text()}", None,
                            priority or ("normal" if important else "low"))
 
     # --------------------------------------------------------------- helpers
-    def readings_line(self):
-        v = self.latest_values or {}
+    def readings_line(self, data=None):
+        if data is not None:
+            v = {k: num(data.get(k)) for k in SENSOR_KEYS}
+            v["MODE"] = num(data.get("MODE"))
+        else:
+            v = self.latest_values or {}
         parts = [f"{ICONS[k]} {fmt(k, v.get(k))}" for k in SENSOR_KEYS]
         mode = "AUTO" if v.get("MODE") == MODE_AUTO else "MANUAL"
         return "📊 " + " | ".join(parts) + f"\n⚙️ Chế độ: {mode}"
+
+    def rf_report(self):
+        """Thời tiết + Random Forest dạng tin Zalo (tham khảo)."""
+        lines = []
+        weather = self.weather.text()
+        if weather:
+            lines.append(weather)
+        if self.esp_online is False:
+            lines.append("🌲 Random Forest: tạm dừng vì ESP32 mất kết nối (số liệu cũ).")
+        else:
+            lines += report_lines(self.rf.result)
+        return lines
 
     def context(self, hours=1):
         """Dữ liệu gọn gửi cho LLM."""
@@ -323,6 +468,7 @@ class Engine:
             data = dict(self.latest_data or {})
             analysis = self.analysis or {}
         th = thresholds(data)
+        rf = self.rf.result or {}
         return {
             "thoi_gian": now_text(),
             "che_do": "AUTO" if num(data.get("MODE")) == MODE_AUTO else "MANUAL",
@@ -342,9 +488,12 @@ class Engine:
                 {"muc": f["severity"], "tieu_de": f["title"], "chi_tiet": f["detail"]}
                 for f in analysis.get("findings", [])
             ],
-            "du_bao_thiet_bi": {
-                SENSORS[k]["name"]: f["headline"] for k, f in (analysis.get("forecasts") or {}).items()
-            },
+            "thoi_tiet_ngoai_troi": self.weather.text(),
+            "random_forest_tham_khao": {
+                "du_doan_3_gio_toi": rf.get("predictions"),
+                "goi_y": rf.get("advice"),
+                "ghi_chu": "Chỉ tham khảo; thiết bị bật/tắt theo ngưỡng cài đặt.",
+            } if rf.get("predictions") else None,
             f"thong_ke_{hours}h": self.stats(hours),
         }
 
@@ -402,21 +551,6 @@ class Engine:
         lines.append("Hiện tại: " + ("; ".join(i["tieu_de"] for i in issues[:3]) if issues else "ổn định ✅"))
         return "\n".join(lines)
 
-    def _track_esp_restart(self, data, now):
-        """ESP_UP (giây chạy liên tục) giảm -> ESP32 vừa khởi động lại; ghi lại kèm lý do."""
-        up = num(data.get("ESP_UP"))
-        if up is None:
-            return
-        prev, self.esp_up_prev = self.esp_up_prev, up
-        if prev is None or up >= prev:
-            return
-        reason = RESET_REASONS.get(data.get("ESP_RST"), "không rõ")
-        self.store.add_device_event(now, "ESP_RESTART", 1, "esp", reason)
-        log.warning("ESP32 khởi động lại: %s", reason)
-        if data.get("ESP_RST") in ("sut_ap", "bat_nguon", "treo"):
-            self.notify(f"🔌 ESP32 vừa khởi động lại — lý do: {reason}.\n"
-                        "Nếu lặp lại nhiều lần: kiểm tra nguồn điện cấp cho bo mạch và rơ-le.")
-
     def hardware_info(self, data, now):
         """Thông tin nguồn/WiFi của ESP32 (cần firmware gửi ESP_UP, ESP_RST, ESP_RSSI)."""
         restarts = [e for e in self.store.device_events(200)
@@ -431,24 +565,7 @@ class Engine:
             "last_restart_reason": restarts[0]["reason"] if restarts else None,
         }
 
-    def _predictive(self, data, analysis, now):
-        """Ghi yêu cầu bật sớm (PRE) cho firmware và báo Zalo khi bắt đầu bật sớm."""
-        payload, started, stopped = self.pre.step(data, analysis, now)
-        if payload is not None and not self.fb.update(payload, path="PRE"):
-            return
-        for dev in started:
-            self.store.add_device_event(now, dev, 1, "predict", self.pre.active[dev]["reason"])
-        if started and config.NOTIFY_DEVICE_CHANGES:
-            lines = [f"• {PRE_NAMES[d].capitalize()} — {self.pre.active[d]['reason']}" for d in started]
-            note = "" if data.get("PRE_ACK") is not None else "\n(Firmware chưa hỗ trợ bật sớm — nạp bản aduno.ino mới)"
-            self.notify("🔮 Bật sớm theo dự báo:\n" + "\n".join(lines) + note, important=False)
-        for dev in stopped:
-            log.info("Thôi bật sớm %s", dev)
-
     def _housekeeping(self, now):
-        since_train = now - self.analyzer.last_train
-        if since_train >= (120 if self.analyzer.model is None else 1800):
-            self.analyzer.maybe_train(self.store.readings_since(now - 86400), now)
         if now - self.last_prune > 3600:
             self.last_prune = now
             self.store.prune()
@@ -460,27 +577,11 @@ class Engine:
                 self.outbox.submit(self._send_daily_report)
 
         every = config.PERIODIC_REPORT_SEC
-        if every > 0 and now - self.last_periodic >= every and not self.periodic_busy:
+        # Tin định kỳ đầu tiên sau khi khởi động 3 phút (đã có thời tiết + kết quả Random Forest)
+        if every > 0 and now - self.last_periodic >= every and now - self.started_at >= 180 and not self.periodic_busy:
             if now >= self.mute_until:
                 self.last_periodic, self.periodic_busy = now, True
                 self.outbox.submit(self._send_periodic_report)
-
-    def _periodic_ai(self, analysis):
-        """Nhận định AI cho tin định kỳ: viết lại mỗi PERIODIC_AI_MIN phút hoặc khi danh sách vấn đề đổi."""
-        if not llm.status()["enabled"]:
-            return None
-        keys = frozenset(f["key"] for f in analysis["findings"] if SEV_RANK[f["severity"]] >= 2)
-        stale = time.time() - self.periodic_ai_ts >= config.PERIODIC_AI_MIN * 60
-        if self.periodic_ai_text is None or stale or keys != self.periodic_ai_keys:
-            text = llm.ask(
-                "Viết 'Nhận định AI' cho tin Zalo định kỳ về nhà nấm: tối đa 4 dòng, mỗi dòng bắt đầu bằng '•'. "
-                "Nêu tình trạng chung, vấn đề đáng lo nhất (nếu có) và 1-2 việc nên làm. Không chào hỏi, "
-                "không liệt kê lại toàn bộ số liệu.",
-                self.context(), effort="low", max_tokens=1500,
-            )
-            if text:
-                self.periodic_ai_text, self.periodic_ai_ts, self.periodic_ai_keys = text, time.time(), keys
-        return self.periodic_ai_text
 
     def _send_periodic_report(self):
         try:
@@ -494,7 +595,7 @@ class Engine:
             )
             door = "Mở" if num(data.get("MO")) == 1 else "Đóng" if num(data.get("DONG")) == 1 else "—"
             lines = [
-                "🍄 NHÀ NẤM",
+                "🍄 NHÀ NẤM — BÁO CÁO ĐỊNH KỲ",
                 *indices.summary_lines(analysis.get("indices")),
                 self.readings_line(),
                 f"🔧 {devices} | Màn che: {door}",
@@ -502,14 +603,7 @@ class Engine:
             important = [f for f in analysis["findings"] if SEV_RANK[f["severity"]] >= 2]
             if important:
                 lines.append("⚠️ " + "; ".join(f["title"] for f in important[:3]))
-            offline = any(f["key"] in ("stale_all", "esp_offline") for f in analysis["findings"])
-            soon = [] if offline else upcoming(analysis.get("forecasts") or {}, 3)
-            if soon:
-                lines.append("🔮 Dự báo:\n" + "\n".join(f"• {sentence(e['text'])}" for e in soon))
-            ai = self._periodic_ai(analysis)
-            if ai:
-                age = int((time.time() - self.periodic_ai_ts) / 60)
-                lines.append(f"\n🧠 Nhận định AI ({'vừa cập nhật' if age < 1 else f'{age} phút trước'}):\n{ai}")
+            lines += ["", *self.rf_report()]
             self.zalo.send("\n".join(lines) + f"\n🕒 {now_text()}", priority="low")
         except Exception:
             log.exception("Lỗi gửi báo cáo định kỳ")
@@ -572,7 +666,9 @@ class Engine:
                 "analysis": self.analysis,
                 "last_ok_ts": self.last_ok_ts,
                 "muted_until": self.mute_until if self.mute_until > time.time() else None,
-                "predictive": self.pre.status(self.latest_data or {}),
+                "rf": self.rf.result or self.rf.info,
+                "weather": self.weather.status(),
+                "esp_online": self.esp_online,
                 "hardware": {
                     "last_change_ts": self.hw_last_change,
                     "esp_ts": (self.latest_data or {}).get("ESP_TS"),
