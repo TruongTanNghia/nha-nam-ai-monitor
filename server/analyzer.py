@@ -376,6 +376,8 @@ class Analyzer:
                     if auto else "Đang ở chế độ thủ công — có thể quên tắt. Gửi lệnh /tat để tắt từ Zalo.",
                 ))
 
+        out += self._state_mismatch(data, rows, now)
+
         # Bật/tắt liên tục (ESP32 không có vùng trễ quanh ngưỡng)
         win = [r for r in rows if r["ts"] >= now - 600]
         for dev, name in (("BOM", "Máy bơm"), ("DEN", "Đèn"), ("QUAT", "Quạt"), ("SUONG", "Phun sương"), ("MO", "Màn che")):
@@ -388,6 +390,60 @@ class Analyzer:
                     "Nên chỉnh ngưỡng hoặc thêm vùng trễ trong firmware để bảo vệ thiết bị.",
                 ))
         return out
+
+    @staticmethod
+    def _state_mismatch(data, rows, now):
+        """AUTO: trạng thái thiết bị ESP32 gửi lên trái hẳn với luật ngưỡng của firmware suốt 2 phút.
+        Firmware cũ đọc lại trạng thái cũ trên Firebase rồi ghi ngược lên -> web hiện sai so với rơ-le thật."""
+        esp_ts = num(data.get("ESP_TS"))
+        if num(data.get("MODE")) != 1 or not esp_ts or now - esp_ts / 1000 > 120:
+            return []
+        win = _window(rows, now, 120)
+        if not win or len(win) < 10 or any(r.get("MODE") != 1 for r in win):
+            return []
+        s = {k: num(data.get(k)) or 0 for k in ("SET_T", "SET_H", "SET_AMDAT", "SET_AS", "SET_DOMAN", "SET_PHLOW", "SET_PHHIGH")}
+
+        def expected(dev, r):
+            """Theo đúng luật autoMode() của firmware (so sánh thẳng, kể cả ngưỡng = 0); None = trong vùng trễ."""
+            v = {k: num(r.get(k)) for k in ("t", "h", "GT_AMDAT", "ANHSANG", "GT_DOMAN", "GT_PH")}
+            ph_lock = v["GT_PH"] is not None and (v["GT_PH"] < s["SET_PHLOW"] or v["GT_PH"] > s["SET_PHHIGH"])
+            if dev == "QUAT" and v["t"] is not None:
+                return 1 if v["t"] > s["SET_T"] + 0.3 else 0 if v["t"] < s["SET_T"] - 0.8 else None
+            if dev == "SUONG" and v["h"] is not None:
+                if ph_lock:
+                    return 0
+                return 1 if v["h"] < s["SET_H"] - 1 else 0 if v["h"] > s["SET_H"] + 3 else None
+            if dev == "BOM" and v["GT_AMDAT"] is not None:
+                if ph_lock or (v["GT_DOMAN"] is not None and v["GT_DOMAN"] > s["SET_DOMAN"]):
+                    return 0
+                return 1 if v["GT_AMDAT"] < s["SET_AMDAT"] - 1 else 0 if v["GT_AMDAT"] > s["SET_AMDAT"] + 3 else None
+            if dev == "DEN" and v["ANHSANG"] is not None:
+                return 1 if v["ANHSANG"] < s["SET_AS"] - 10 else 0 if v["ANHSANG"] > s["SET_AS"] + 60 else None
+            return None
+
+        why = {
+            "QUAT": ("Quạt", "t", "SET_T", "nhiệt độ"),
+            "SUONG": ("Phun sương", "h", "SET_H", "độ ẩm không khí"),
+            "BOM": ("Máy bơm", "GT_AMDAT", "SET_AMDAT", "độ ẩm đất"),
+            "DEN": ("Đèn", "ANHSANG", "SET_AS", "ánh sáng"),
+        }
+        parts = []
+        for dev, (name, key, set_key, label) in why.items():
+            exp = [expected(dev, r) for r in win]
+            if exp[-1] is None or any(e != exp[-1] for e in exp) or any(r.get(dev) == exp[-1] for r in win):
+                continue
+            shown = "TẮT" if exp[-1] else "BẬT"
+            parts.append(f"{name} hiện {shown} dù {label} {fmt(key, num(data.get(key)))} "
+                         f"(ngưỡng {fmt(key, s[set_key])}) — đúng ra phải {'BẬT' if exp[-1] else 'TẮT'}")
+        if not parts:
+            return []
+        return [finding(
+            "device_state_mismatch", "warning", "device",
+            "Trạng thái thiết bị trên web không khớp với rơ-le",
+            "; ".join(parts) + ". Kéo dài hơn 2 phút ở chế độ AUTO. Thường do bo ESP32 đang chạy firmware cũ "
+            "(đọc lại trạng thái cũ trên Firebase rồi ghi ngược lên) — nạp lại aduno.ino mới nhất. "
+            "Nếu đã nạp bản mới mà vẫn lệch: kiểm tra rơ-le và dây nối.",
+        )]
 
     @staticmethod
     def _summary(findings, idx):
