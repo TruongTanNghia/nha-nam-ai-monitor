@@ -82,15 +82,17 @@ class Storage:
             ).fetchall()
         return {"range": range_key, "bucket_sec": bucket, "points": [dict(r) for r in rows]}
 
-    def hourly_readings(self, since_ts, min_samples=30):
-        """Trung bình từng giờ (giờ tròn, epoch) của cảm biến + tỉ lệ thời gian bật thiết bị."""
+    def hourly_readings(self, since_ts, min_samples=30, tail_sec=3600):
+        """Trung bình từng giờ (giờ tròn, epoch) của cảm biến + tỉ lệ thời gian bật thiết bị.
+        tail_sec < 3600: chỉ lấy `tail_sec` giây cuối mỗi giờ (trạng thái lúc cuối giờ, không bị kéo bởi đầu giờ)."""
         sensors = ", ".join(f'AVG("{k}") AS "{k}"' for k in SENSOR_KEYS)
         devices = ", ".join(f'AVG("{k}") AS "{k}"' for k in DEVICE_KEYS)
         with self.lock:
             rows = self.conn.execute(
                 f"""SELECT CAST(ts / 3600 AS INTEGER) * 3600 AS hour, COUNT(*) AS n, {sensors}, {devices}
-                    FROM readings WHERE ts >= ? GROUP BY hour HAVING n >= ? ORDER BY hour""",
-                (since_ts, min_samples),
+                    FROM readings WHERE ts >= ? AND ts - CAST(ts / 3600 AS INTEGER) * 3600 >= ?
+                    GROUP BY hour HAVING n >= ? ORDER BY hour""",
+                (since_ts, 3600 - tail_sec, min_samples),
             ).fetchall()
         return [dict(r) for r in rows]
 

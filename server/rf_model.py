@@ -2,10 +2,11 @@
 
 Thiết bị vẫn bật/tắt theo ngưỡng (firmware ESP32); kết quả ở đây chỉ hiện trên web và gửi Zalo để tham khảo.
 
-Một mô hình RandomForestRegressor (nhiều đầu ra) học từ dữ liệu theo giờ:
-  đầu vào  : chỉ số trong nhà giờ H (nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng), tỉ lệ bật thiết bị giờ H,
+Một mô hình RandomForestRegressor (nhiều đầu ra) học từ dữ liệu theo giờ. "Trạng thái" của 1 giờ là trung bình
+15 phút CUỐI giờ đó (trung bình cả giờ bị kéo lệch khi cảm biến vừa đổi mạnh, vd độ ẩm đất 0% -> 100%):
+  đầu vào  : trạng thái trong nhà giờ H (nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng, thiết bị đang bật),
              thời tiết ngoài trời giờ H và giờ H+1 (nhiệt độ, độ ẩm, mây, bức xạ, mưa, gió), giờ trong ngày
-  đầu ra   : nhiệt độ, độ ẩm KK, độ ẩm đất trong nhà giờ H+1
+  đầu ra   : nhiệt độ, độ ẩm KK, độ ẩm đất trong nhà 1 giờ sau
 Dự kiến 3 giờ tới bằng cách lặp 3 bước với thời tiết dự báo.
 """
 import logging
@@ -44,6 +45,7 @@ GROUPS = {
     "Chỉ số trong nhà hiện tại": INDOOR,
 }
 MIN_SAMPLES = 24   # tối thiểu 24 giờ có cả dữ liệu cảm biến lẫn thời tiết
+STATE_SEC = 900    # trạng thái = trung bình 15 phút gần nhất (khi huấn luyện: 15 phút cuối mỗi giờ)
 RETRAIN_SEC = 3600
 
 
@@ -72,7 +74,7 @@ class RFAnalyzer:
         if RandomForestRegressor is None:
             self.info["note"] = "Chưa cài scikit-learn"
             return
-        hours = self.store.hourly_readings(now - 30 * 86400)
+        hours = self.store.hourly_readings(now - 30 * 86400, min_samples=10, tail_sec=STATE_SEC)
         by_hour = {r["hour"]: r for r in hours}
         weather = self.store.weather_between(now - 31 * 86400, now)
         X, Y = [], []
@@ -116,12 +118,12 @@ class RFAnalyzer:
 
     # ------------------------------------------------------------------ phân tích
     def analyze(self, recent_rows, data, now=None):
-        """recent_rows: số liệu ~60 phút gần nhất; data: bản ghi Firebase mới nhất."""
+        """recent_rows: số liệu gần đây (cũ -> mới); data: bản ghi Firebase mới nhất."""
         now = now or time.time()
         if now - self.last_train >= RETRAIN_SEC or (self.model is None and now - self.last_train >= 600):
             self.train(now)
         th = thresholds(data)
-        rows = [r for r in recent_rows if r["ts"] >= now - 3600]
+        rows = [r for r in recent_rows if r["ts"] >= now - STATE_SEC] or recent_rows[-1:]
         indoor = {k: _mean(rows, k) for k in INDOOR}
         devices = {k: _mean(rows, k) or 0 for k in DEVICES}
         hour_ts = int(now // 3600 * 3600)
@@ -138,7 +140,8 @@ class RFAnalyzer:
                 predictions.append({"hours": step, **{k: round(state[k], 1) for k in TARGETS}})
         self.result = {
             **self.info,
-            "now": {k: (round(v, 1) if v is not None else None) for k, v in indoor.items()},
+            # "Bây giờ" = số đo mới nhất (giống thẻ cảm biến), không phải trung bình
+            "now": {k: (round(num(data.get(k)), 1) if num(data.get(k)) is not None else None) for k in INDOOR},
             "predictions": predictions,
             "advice": self._advice(predictions, th, now),
             "ts": now,

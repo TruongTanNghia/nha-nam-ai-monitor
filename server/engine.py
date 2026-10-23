@@ -35,7 +35,7 @@ LINK_KEYS = ("stale_all", "esp_offline")  # mất kết nối ESP32: đã có ti
 ESP_OFFLINE_SEC = 60       # nhịp tim ESP_TS đứng yên 60 giây -> coi là mạch tắt / mất kết nối
 ESP_STALE_SEC = 300        # firmware cũ (không có ESP_TS): số liệu đứng yên 5 phút
 WEATHER_EVERY = 900        # cập nhật thời tiết 15 phút/lần
-RF_EVERY = 600             # chạy lại Random Forest 10 phút/lần
+RF_EVERY = 120             # dự đoán lại 2 phút/lần (huấn luyện lại mỗi giờ) để theo kịp khi cảm biến đổi mạnh
 
 
 def now_text(ts=None):

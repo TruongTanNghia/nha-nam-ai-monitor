@@ -194,7 +194,7 @@ function renderRF() {
       const bad = (v) => lim && v !== null && (dir > 0 ? v > lim : v < lim);
       const cell = (v) => `<div class="rf-val ${bad(v) ? "warn" : ""}">${v === null || v === undefined ? "—" : fmtWithUnit(k, v)}</div>`;
       return `<div class="rf-name"><span class="swatch" style="background:var(${SENSOR_BY_KEY[k].color})"></span>${name}</div>`
-        + cell(rf.now?.[k]) + rf.predictions.map((p) => cell(p[k])).join("");
+        + cell(th[k] !== undefined && th[k] !== null ? Number(th[k]) : rf.now?.[k]) +rf.predictions.map((p) => cell(p[k])).join("");  // "Bây giờ" = số đo mới nhất
     }).join("");
     body = `<div class="rf-table" style="--cols:${rf.predictions.length + 1}">${head}${rows}</div>`;
   }
