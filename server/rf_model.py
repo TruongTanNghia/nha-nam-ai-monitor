@@ -183,37 +183,42 @@ class RFAnalyzer:
         return self.result
 
     def _advice(self, predictions, live, th, now):
-        """So dự đoán với ngưỡng: sắp vượt ngưỡng / đang ngoài ngưỡng và bao lâu trở lại."""
+        """So số đo hiện tại + dự đoán với ngưỡng: đang ngoài ngưỡng (luôn báo, kể cả khi mô hình đang học),
+        bao lâu nữa trở lại, hoặc sắp vượt ngưỡng."""
         lo_ph, hi_ph = th["SET_PHLOW"], th["SET_PHHIGH"]
-        rules = [  # (chỉ số, hàm "ngoài ngưỡng", mô tả ngưỡng, thiết bị phản ứng)
+        rules = [  # (chỉ số, hàm "ngoài ngưỡng", mô tả ngưỡng, thiết bị lúc sắp vượt, thiết bị lúc đang vượt)
             ("t", (lambda v: v > th["SET_T"]) if th["SET_T"] else None,
-             f"trên ngưỡng {fmt('t', th['SET_T'])}", "quạt sẽ bật theo ngưỡng"),
+             f"trên ngưỡng {fmt('t', th['SET_T'])}", "quạt sẽ bật theo ngưỡng", "quạt đang bật theo ngưỡng"),
             ("h", (lambda v: v < th["SET_H"]) if th["SET_H"] else None,
-             f"dưới ngưỡng {fmt('h', th['SET_H'])}", "phun sương sẽ bật theo ngưỡng"),
+             f"dưới ngưỡng {fmt('h', th['SET_H'])}", "phun sương sẽ bật theo ngưỡng", "phun sương đang bật theo ngưỡng"),
             ("GT_AMDAT", (lambda v: v < th["SET_AMDAT"]) if th["SET_AMDAT"] else None,
-             f"dưới ngưỡng {fmt('GT_AMDAT', th['SET_AMDAT'])}", "máy bơm sẽ bật theo ngưỡng"),
+             f"dưới ngưỡng {fmt('GT_AMDAT', th['SET_AMDAT'])}", "máy bơm sẽ bật theo ngưỡng", "máy bơm đang bật theo ngưỡng"),
             ("GT_PH", (lambda v: (lo_ph and v < lo_ph) or (hi_ph and v > hi_ph)) if (lo_ph or hi_ph) else None,
-             f"ngoài khoảng {lo_ph or '—'}–{hi_ph or '—'}", "máy bơm và phun sương sẽ bị khóa; kiểm tra nước cấp"),
+             f"ngoài khoảng {lo_ph or '—'}–{hi_ph or '—'}", "máy bơm và phun sương sẽ bị khóa; kiểm tra nước cấp",
+             "máy bơm và phun sương đang bị khóa; kiểm tra nước cấp"),
             ("GT_DOMAN", (lambda v: v > th["SET_DOMAN"]) if th["SET_DOMAN"] else None,
-             f"trên ngưỡng {fmt('GT_DOMAN', th['SET_DOMAN'])}", "máy bơm sẽ bị khóa; kiểm tra nguồn nước"),
+             f"trên ngưỡng {fmt('GT_DOMAN', th['SET_DOMAN'])}", "máy bơm sẽ bị khóa; kiểm tra nguồn nước",
+             "máy bơm đang bị khóa; kiểm tra nguồn nước"),
         ]
-        tips = []
-        for k, out_of, limit_text, action in rules:
-            series = [(p["hours"], p[k]) for p in predictions if p.get(k) is not None]
-            if not out_of or not series or live.get(k) is None:
+        tips, out_now = [], False
+        for k, out_of, limit_text, soon_action, now_action in rules:
+            v_now = live.get(k)
+            if not out_of or v_now is None or (k == "GT_AMDAT" and v_now <= 0.5):
                 continue
+            series = [(p["hours"], p[k]) for p in predictions if p.get(k) is not None]
             name = SENSORS[k]["name"]
-            if not out_of(live[k]):
+            if out_of(v_now):  # ĐANG ngoài ngưỡng: luôn báo, không cần mô hình
+                out_now = True
+                text = f"{name} đang {fmt(k, v_now)} ({limit_text}) — {now_action}"
+                if series:
+                    back = next(((hrs, v) for hrs, v in series if not out_of(v)), None)
+                    text += (f"; dự kiến khoảng {back[0]} giờ nữa trở lại trong ngưỡng (~{fmt(k, back[1])})" if back
+                             else "; có thể vẫn chưa về ngưỡng trong 3 giờ tới — kiểm tra thiết bị")
+                tips.append(text + ".")
+            else:
                 first = next(((hrs, v) for hrs, v in series if out_of(v)), None)
                 if first:
-                    tips.append(f"{name} có thể tới khoảng {fmt(k, first[1])} sau {first[0]} giờ ({limit_text}) — {action}.")
-            else:
-                back = next(((hrs, v) for hrs, v in series if not out_of(v)), None)
-                now_text = f"{name} đang {fmt(k, live[k])} ({limit_text})"
-                if back:
-                    tips.append(f"{now_text}; dự kiến khoảng {back[0]} giờ nữa trở lại trong ngưỡng (~{fmt(k, back[1])}).")
-                else:
-                    tips.append(f"{now_text} và có thể vẫn chưa về ngưỡng trong 3 giờ tới — kiểm tra thiết bị.")
+                    tips.append(f"{name} có thể tới khoảng {fmt(k, first[1])} sau {first[0]} giờ ({limit_text}) — {soon_action}.")
         nxt = [self.weather.at(now + k * 3600) for k in (1, 2, 3)]
         nxt = [w for w in nxt if w]
         rain = sum(w.get("precip") or 0 for w in nxt)
@@ -224,7 +229,9 @@ class RFAnalyzer:
             tips.append(f"Ngoài trời nắng nóng tới {hot:.0f}°C trong 3 giờ tới.")
         if predictions and (live.get("GT_AMDAT") or 0) <= 0.5:
             tips.append("Độ ẩm đất đang báo 0% — cảm biến có thể chưa cắm/đứt dây nên chưa dự đoán độ ẩm đất.")
-        if not tips:
+        if not predictions and not out_now:
+            tips.append("Các chỉ số đang trong ngưỡng. Chưa dự đoán được 3 giờ tới vì mô hình còn đang học.")
+        elif not tips:
             tips.append("Chưa thấy chỉ số nào có khả năng vượt ngưỡng trong 3 giờ tới.")
         return tips
 
@@ -234,7 +241,8 @@ def report_lines(result):
     if not result:
         return ["🌲 Random Forest: đang khởi động…"]
     if not result.get("predictions"):
-        return [f"🌲 Random Forest: {result.get('note') or 'chưa có dự đoán'}"]
+        return ([f"🌲 Random Forest: {result.get('note') or 'chưa có dự đoán'}"]
+                + [f"👉 {tip}" for tip in result.get("advice") or []])
     lines = ["🌲 Phân tích Random Forest (tham khảo — thiết bị vẫn bật/tắt theo ngưỡng):"]
     for p in result["predictions"]:
         lines.append(f"• +{p['hours']} giờ: 🌡 {fmt('t', p['t'])} | 💧 {fmt('h', p['h'])} | 🌱 {fmt('GT_AMDAT', p['GT_AMDAT'])}"
