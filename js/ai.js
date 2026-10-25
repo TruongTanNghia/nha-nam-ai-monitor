@@ -190,7 +190,7 @@ function renderRF() {
   if (backend.hardwareOffline) {
     body = emptyState("unplug", "Tạm dừng phân tích", "ESP32 đang mất kết nối nên số liệu trong nhà đã cũ.");
   } else if (!rf?.predictions?.length) {
-    const pct = Math.min(100, Math.round(((rf?.samples || 0) / 36) * 100));
+    const pct = Math.min(100, Math.round(((rf?.samples || 0) / 60) * 100));
     body = `
       <div class="rf-learning">
         ${icon("loader")}<div><b>Đang thu thập dữ liệu để kiểm chứng</b><small>${esc(rf?.note || "Đang chờ dữ liệu")}</small>

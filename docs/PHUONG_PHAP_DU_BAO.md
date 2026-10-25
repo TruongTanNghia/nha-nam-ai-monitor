@@ -13,39 +13,43 @@ Dự báo sau **1, 2 và 3 giờ** cho 5 chỉ số trong nhà nấm: nhiệt đ
 | Cảm biến ESP32 (qua Firebase) | nhiệt độ, độ ẩm KK, ánh sáng, độ ẩm đất, pH, độ mặn, trạng thái 5 thiết bị | 5 giây/lần, lưu SQLite |
 | Open-Meteo (miễn phí, không cần key) | nhiệt độ, độ ẩm, mây, bức xạ mặt trời, lượng mưa, gió ngoài trời | theo giờ: 31 ngày qua + 2 ngày tới |
 
-**Mẫu dữ liệu:** mỗi giờ H là một mẫu. *Trạng thái* của giờ H là trung bình **15 phút cuối** giờ đó. Không lấy trung bình cả giờ vì khi một chỉ số vừa đổi mạnh, trung bình cả giờ sẽ không phản ánh đúng trạng thái lúc cuối giờ.
+**Trạng thái:** cứ 15 phút lấy trung bình các lần đo trong 15 phút đó (lọc nhiễu của cảm biến, vẫn bám kịp khi chỉ số đổi nhanh).
+
+**Mẫu dữ liệu:** một mẫu = (trạng thái lúc τ, mốc dự báo h ∈ {1, 2, 3} giờ) → mức thay đổi của 5 chỉ số từ τ tới τ + h. Mỗi trạng thái cho tối đa 3 mẫu; chỉ cần có số liệu lúc τ + h là dùng được, không bắt buộc đủ cả 3 giờ liên tục.
 
 ## 3. Làm sạch dữ liệu (quy tắc cố định, không chỉnh tay)
-Một giờ bị **loại** nếu, ở giờ đó hoặc ở 3 giờ sau:
-1. Có chỉ số nằm ngoài khoảng vật lý của cảm biến (ví dụ độ ẩm ngoài 0–100%, pH ngoài 0–14).
-2. Độ ẩm đất đúng **0%**: cảm biến chưa cắm vào đất hoặc đứt dây. Firmware cũng coi đây là lỗi.
-3. Thay đổi vượt mức vật lý hợp lý trong 1 giờ (nhiệt độ 6°C, độ ẩm 25%, độ ẩm đất 25%, pH 1, độ mặn 300 ppm). Thường đây là do rút/cắm lại cảm biến, không phải diễn biến thật.
+Một trạng thái 15 phút bị **loại** nếu:
+1. Có ít hơn 10 lần đo, hoặc có chỉ số nằm ngoài khoảng vật lý của cảm biến (ví dụ độ ẩm ngoài 0–100%, pH ngoài 0–14).
+2. Độ ẩm đất đúng **0%**: cảm biến chưa cắm vào đất hoặc đứt dây.
 
-Số giờ bị loại được hiển thị trên web.
+Một mẫu bị loại nếu thay đổi vượt mức vật lý hợp lý (mỗi giờ: nhiệt độ 6°C, độ ẩm 25%, độ ẩm đất 25%, pH 1, độ mặn 300 ppm). Thường đây là do rút/cắm lại cảm biến, không phải diễn biến thật.
 
-## 4. Đặc trưng đầu vào (31 biến)
-- Trạng thái trong nhà giờ H: 6 chỉ số.
-- Tỉ lệ thời gian bật của 5 thiết bị trong 15 phút cuối giờ H.
-- Thời tiết giờ H: 6 biến.
-- Thời tiết giờ H+1, H+2, H+3 (nhiệt độ, độ ẩm, bức xạ, mưa): 12 biến. Khi học dùng số đo thật; khi dự báo dùng dự báo của Open-Meteo.
+Số đoạn bị loại được hiển thị trên web.
+
+## 4. Đặc trưng đầu vào (24 biến)
+- Trạng thái trong nhà lúc τ: 6 chỉ số.
+- Tỉ lệ thời gian bật của 5 thiết bị trong 15 phút đó.
+- Thời tiết lúc τ: 6 biến.
+- Thời tiết lúc τ + h (nhiệt độ, độ ẩm, bức xạ, mưa): 4 biến. Khi học dùng số đo thật; khi dự báo dùng dự báo của Open-Meteo.
 - Giờ trong ngày, mã hóa sin/cos (để 23h và 0h gần nhau).
+- Mốc dự báo h (1, 2 hoặc 3 giờ).
 
 ## 5. Mô hình
-- **Một** `RandomForestRegressor` (Breiman, 2001) nhiều đầu ra: 200 cây, độ sâu tối đa 8, tối thiểu 3 mẫu/lá.
-- **Đầu ra (15):** *mức thay đổi* của 5 chỉ số sau 1, 2, 3 giờ, so với hiện tại. Dự báo = số đo hiện tại + mức thay đổi.
+- **Một** `RandomForestRegressor` (Breiman, 2001) nhiều đầu ra: 200 cây, độ sâu tối đa 10, tối thiểu 3 mẫu/lá.
+- **Đầu ra (5):** *mức thay đổi* của 5 chỉ số sau h giờ so với hiện tại; h là biến đầu vào nên một mô hình dự báo cả 3 mốc. Dự báo = số đo hiện tại + mức thay đổi.
   - Học *mức thay đổi* thay vì giá trị tuyệt đối: khi dữ liệu ít, mô hình không bị kéo về giá trị trung bình lịch sử.
   - Dự báo **trực tiếp** từng mốc giờ, không lặp từng bước: sai số không cộng dồn.
 - Học lại mỗi giờ trên toàn bộ dữ liệu 30 ngày gần nhất.
 
 ## 6. Kiểm chứng
-- **Walk-forward (TimeSeriesSplit, tối đa 5 lần):** mỗi lần học trên các giờ trước, thử trên các giờ **sau đó** mà mô hình chưa thấy. Không xáo trộn dữ liệu theo thời gian, vì xáo trộn sẽ cho kết quả đẹp giả.
-- **Khoảng trống 3 giờ** giữa tập học và tập thử: mục tiêu 3 giờ của mẫu học không chồng lên tập thử, tránh rò rỉ dữ liệu.
+- **Walk-forward theo thời gian (tối đa 4 lần):** chia khoảng thời gian có dữ liệu thành các đoạn liên tiếp. Mỗi lần thử trên một đoạn **sau**, mô hình chưa thấy đoạn đó. Không xáo trộn dữ liệu theo thời gian, vì xáo trộn sẽ cho kết quả đẹp giả.
+- **Không rò rỉ dữ liệu:** tập học của mỗi lần chỉ gồm các mẫu mà *kết quả* (lúc τ + h) đã có **trước** khi đoạn thử bắt đầu, giống hệt tình huống dự báo thật.
 - **Mốc chuẩn "giữ nguyên" (persistence):** dự báo giá trị sau h giờ = giá trị hiện tại. Đây là mốc chuẩn tiêu chuẩn trong dự báo chuỗi thời gian (Hyndman & Athanasopoulos). Mô hình chỉ có ý nghĩa khi tốt hơn mốc này.
 - **Chỉ số đánh giá:**
   - MAE: sai số tuyệt đối trung bình, cùng đơn vị với chỉ số.
   - Skill (%) = (1 − MAE<sub>mô hình</sub> / MAE<sub>giữ nguyên</sub>) × 100. Dương nghĩa là mô hình tốt hơn.
 - **Quy tắc hiển thị:** với mỗi cặp (chỉ số, mốc giờ), nếu skill ≤ 0 thì web và Zalo hiển thị giá trị *giữ nguyên*, đánh dấu “=”. Hệ thống không đưa ra con số mà nó không chứng minh được là tốt hơn cách đơn giản nhất.
-- **Chưa kiểm chứng thì chưa dự báo:** cần tối thiểu 36 mẫu giờ. Trước đó web ghi “Đang thu thập dữ liệu để kiểm chứng”.
+- **Chưa kiểm chứng thì chưa dự báo:** cần tối thiểu 60 mẫu (khoảng 7–10 giờ máy chủ chạy liên tục) và ít nhất 2 lần kiểm chứng. Trước đó web ghi “Đang thu thập dữ liệu để kiểm chứng” kèm số giờ còn thiếu. Trong lúc đó web vẫn báo các chỉ số **đang** ngoài ngưỡng.
 
 ## 7. Khoảng sai số
 Mỗi ô dự báo kèm **±**: phân vị 80% của sai số tuyệt đối đo được khi kiểm chứng. Nghĩa là khoảng 80% lần dự báo trước đây có sai số không vượt quá mức này.
@@ -65,5 +69,5 @@ Mỗi ô dự báo kèm **±**: phân vị 80% của sai số tuyệt đối đo
 ## Tài liệu tham khảo
 - L. Breiman (2001). *Random Forests*. Machine Learning 45(1), 5–32.
 - R. J. Hyndman, G. Athanasopoulos (2021). *Forecasting: Principles and Practice*, 3rd ed., OTexts. Các mục 5.2 (phương pháp đơn giản làm mốc chuẩn) và 5.10 (kiểm chứng chéo theo chuỗi thời gian).
-- scikit-learn: `RandomForestRegressor`, `TimeSeriesSplit` (tham số `gap`).
+- scikit-learn: `RandomForestRegressor`.
 - Open-Meteo Weather Forecast API: https://open-meteo.com

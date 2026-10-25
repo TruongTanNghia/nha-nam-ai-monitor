@@ -3,15 +3,16 @@
 Thiết bị vẫn bật/tắt theo ngưỡng (firmware ESP32). Phương pháp chi tiết: docs/PHUONG_PHAP_DU_BAO.md
 
 Tóm tắt:
-- Dữ liệu: mỗi giờ H lấy "trạng thái" = trung bình 15 phút cuối giờ của nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng,
-  pH, độ mặn, tỉ lệ bật thiết bị; ghép thời tiết Open-Meteo giờ H và giờ H+1..H+3.
-- Làm sạch: bỏ giờ có cảm biến ngoài khoảng vật lý, độ ẩm đất đúng 0% (cảm biến chưa cắm/đứt dây),
-  và giờ có thay đổi vượt mức vật lý hợp lý (nhảy số khi cắm lại cảm biến).
-- Mô hình: MỘT RandomForestRegressor nhiều đầu ra, dự báo TRỰC TIẾP mức thay đổi sau 1, 2, 3 giờ
-  của 5 chỉ số (15 đầu ra) — không lặp từng bước nên sai số không cộng dồn.
-- Kiểm chứng: walk-forward (TimeSeriesSplit, chừa khoảng trống 3 giờ giữa tập học và tập thử), so với
-  mốc chuẩn "giữ nguyên" (persistence: giá trị sau h giờ = giá trị hiện tại). Chỉ số/mốc giờ nào mô hình
-  KHÔNG tốt hơn mốc chuẩn thì hiển thị giá trị giữ nguyên và ghi rõ. Chưa đủ dữ liệu kiểm chứng thì chưa dự báo.
+- Dữ liệu: cứ 15 phút lấy 1 "trạng thái" = trung bình 15 phút của nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng,
+  pH, độ mặn, tỉ lệ bật thiết bị; ghép thời tiết Open-Meteo lúc đó và lúc cần dự báo.
+- Mẫu = (trạng thái lúc τ, mốc h ∈ {1,2,3} giờ) -> mức thay đổi của 5 chỉ số tới lúc τ + h.
+- Làm sạch: bỏ trạng thái có cảm biến ngoài khoảng vật lý, độ ẩm đất đúng 0% (cảm biến chưa cắm/đứt dây),
+  và mẫu có thay đổi vượt mức vật lý hợp lý (nhảy số khi cắm lại cảm biến).
+- Mô hình: MỘT RandomForestRegressor, mốc giờ h là một biến đầu vào, dự báo TRỰC TIẾP từng mốc
+  (không lặp từng bước nên sai số không cộng dồn).
+- Kiểm chứng: walk-forward theo thời gian — mỗi lần thử trên 1 đoạn thời gian sau, chỉ học các mẫu mà kết quả
+  đã biết TRƯỚC khi đoạn thử bắt đầu (không rò rỉ dữ liệu). So với mốc chuẩn "giữ nguyên" (persistence).
+  Chỉ số/mốc giờ nào mô hình KHÔNG tốt hơn mốc chuẩn thì hiển thị giá trị giữ nguyên và ghi rõ.
 - Khoảng sai số: phân vị 80% của sai số tuyệt đối đo được khi kiểm chứng.
 """
 import logging
@@ -24,58 +25,55 @@ from sensors import SENSORS, fmt, is_valid, num, thresholds
 
 try:
     from sklearn.ensemble import RandomForestRegressor
-    from sklearn.model_selection import TimeSeriesSplit
 except ImportError:
-    RandomForestRegressor = TimeSeriesSplit = None
+    RandomForestRegressor = None
 
 log = logging.getLogger("rf")
 
 INDOOR = ["t", "h", "GT_AMDAT", "ANHSANG", "GT_PH", "GT_DOMAN"]
 DEVICES = ["QUAT", "SUONG", "BOM", "DEN", "MO"]
-OUT = ["temp", "hum", "cloud", "rad", "precip", "wind"]   # thời tiết giờ hiện tại
-OUT_FUT = ["temp", "hum", "rad", "precip"]                 # thời tiết các giờ tới (dự báo Open-Meteo)
+OUT = ["temp", "hum", "cloud", "rad", "precip", "wind"]   # thời tiết lúc hiện tại
+OUT_FUT = ["temp", "hum", "rad", "precip"]                 # thời tiết lúc cần dự báo (dự báo Open-Meteo)
 TARGETS = ["t", "h", "GT_AMDAT", "GT_PH", "GT_DOMAN"]
 HORIZONS = (1, 2, 3)
 OUTPUTS = [(hz, k) for hz in HORIZONS for k in TARGETS]
 # Thay đổi lớn nhất hợp lý trong 1 giờ trong nhà nấm; vượt quá = lỗi cảm biến, bỏ khi học
 MAX_JUMP = {"t": 6.0, "h": 25.0, "GT_AMDAT": 25.0, "GT_PH": 1.0, "GT_DOMAN": 300.0}
 
-FEATURES = (INDOOR + DEVICES + [f"o_{k}" for k in OUT]
-            + [f"f{hz}_{k}" for hz in HORIZONS for k in OUT_FUT] + ["hour_sin", "hour_cos"])
+FEATURES = (INDOOR + DEVICES + [f"o_{k}" for k in OUT] + [f"f_{k}" for k in OUT_FUT]
+            + ["hour_sin", "hour_cos", "horizon"])
 GROUPS = {  # gộp đặc trưng thành nhóm dễ hiểu khi giải thích "yếu tố ảnh hưởng"
-    "Nhiệt độ ngoài trời": ["o_temp"] + [f"f{hz}_temp" for hz in HORIZONS],
-    "Nắng (bức xạ mặt trời)": ["o_rad"] + [f"f{hz}_rad" for hz in HORIZONS],
-    "Độ ẩm ngoài trời": ["o_hum"] + [f"f{hz}_hum" for hz in HORIZONS],
-    "Mưa": ["o_precip"] + [f"f{hz}_precip" for hz in HORIZONS],
+    "Nhiệt độ ngoài trời": ["o_temp", "f_temp"],
+    "Nắng (bức xạ mặt trời)": ["o_rad", "f_rad"],
+    "Độ ẩm ngoài trời": ["o_hum", "f_hum"],
+    "Mưa": ["o_precip", "f_precip"],
     "Mây": ["o_cloud"],
     "Gió": ["o_wind"],
     "Giờ trong ngày": ["hour_sin", "hour_cos"],
+    "Dự báo xa hay gần (1–3 giờ)": ["horizon"],
     "Thiết bị đang chạy": DEVICES,
     "Chỉ số trong nhà hiện tại": INDOOR,
 }
-MIN_SAMPLES = 36   # cần >= 36 mẫu (giờ) để vừa học vừa kiểm chứng walk-forward 3 lần
-STATE_SEC = 900    # trạng thái = trung bình 15 phút gần nhất (khi học: 15 phút cuối mỗi giờ)
+STEP = 900          # 1 trạng thái = trung bình 15 phút
+MIN_SAMPLES = 60    # ~7 giờ chạy liên tục (mỗi 15 phút cho tối đa 3 mẫu: +1, +2, +3 giờ)
+MIN_TRAIN, MIN_TEST = 24, 6
+FOLDS = 4
 RETRAIN_SEC = 3600
-RF_PARAMS = dict(n_estimators=200, max_depth=8, min_samples_leaf=3, random_state=42, n_jobs=1)
-METHOD = ("Random Forest nhiều đầu ra (200 cây), dự báo trực tiếp mức thay đổi sau 1–3 giờ; "
+RF_PARAMS = dict(n_estimators=200, max_depth=10, min_samples_leaf=3, random_state=42, n_jobs=1)
+METHOD = ("Random Forest (200 cây), dự báo trực tiếp mức thay đổi sau 1–3 giờ; "
           "kiểm chứng walk-forward theo thời gian, so với mốc chuẩn 'giữ nguyên giá trị'")
 
 
-def _features(state, devices, weather_at, hour_ts):
-    """weather_at(ts) -> thời tiết của giờ chứa ts (dict) hoặc None."""
-    hour = time.localtime(hour_ts).tm_hour
-    w0 = weather_at(hour_ts) or {}
+def _features(state, devices, w_now, w_fut, t_mid, hz):
+    hour = time.localtime(t_mid).tm_hour + time.localtime(t_mid).tm_min / 60
     row = [state.get(k) for k in INDOOR] + [devices.get(k, 0) or 0 for k in DEVICES]
-    row += [w0.get(k) for k in OUT]
-    for hz in HORIZONS:
-        w = weather_at(hour_ts + hz * 3600) or {}
-        row += [w.get(k) for k in OUT_FUT]
-    row += [math.sin(2 * math.pi * hour / 24), math.cos(2 * math.pi * hour / 24)]
+    row += [(w_now or {}).get(k) for k in OUT] + [(w_fut or {}).get(k) for k in OUT_FUT]
+    row += [math.sin(2 * math.pi * hour / 24), math.cos(2 * math.pi * hour / 24), hz]
     return None if any(v is None for v in row) else row
 
 
 def _clean(r):
-    """Giờ dùng được: mọi chỉ số trong khoảng vật lý; độ ẩm đất đúng 0% = cảm biến chưa cắm/đứt dây."""
+    """Trạng thái dùng được: mọi chỉ số trong khoảng vật lý; độ ẩm đất đúng 0% = cảm biến chưa cắm/đứt dây."""
     return r is not None and all(is_valid(k, r.get(k)) for k in INDOOR) and r["GT_AMDAT"] > 0.5
 
 
@@ -93,64 +91,93 @@ class RFAnalyzer:
 
     # ------------------------------------------------------------------ dữ liệu
     def _dataset(self, now):
-        hours = self.store.hourly_readings(now - 30 * 86400, min_samples=10, tail_sec=STATE_SEC)
-        by_hour = {r["hour"]: r for r in hours}
+        buckets = self.store.bucket_readings(now - 30 * 86400, size=STEP)
         weather = self.store.weather_between(now - 31 * 86400, now)
-        X, Y, T, skipped = [], [], [], 0
-        for h in sorted(by_hour):
-            r = by_hour[h]
-            future = [by_hour.get(h + hz * 3600) for hz in HORIZONS]
-            if any(f is None for f in future):
+        w_at = lambda ts: weather.get(int(ts // 3600 * 3600))
+        X, Y, T, HZ, skipped = [], [], [], [], 0
+        bad = {b for b, r in buckets.items() if not _clean(r)}
+        for b in sorted(buckets):
+            if b in bad:
                 continue
-            if not _clean(r) or not all(_clean(f) for f in future):
-                skipped += 1
-                continue
-            dy = [f[k] - r[k] for f in future for k in TARGETS]       # thứ tự giống OUTPUTS
-            if any(abs(d) > MAX_JUMP[k] * hz for (hz, k), d in zip(OUTPUTS, dy)):
-                skipped += 1
-                continue
-            x = _features(r, r, weather.get, h)  # thời tiết các giờ sau: số đo thật (thay cho dự báo)
-            if x is not None:
-                X.append(x)
-                Y.append(dy)
-                T.append(h)
-        return np.array(X, dtype=float), np.array(Y, dtype=float), T, skipped
+            r, t_mid = buckets[b], b + STEP / 2
+            for hz in HORIZONS:
+                f = buckets.get(b + hz * 3600)
+                if f is None:
+                    continue
+                if b + hz * 3600 in bad:
+                    skipped += 1
+                    continue
+                dy = [f[k] - r[k] for k in TARGETS]
+                if any(abs(d) > MAX_JUMP[k] * hz for k, d in zip(TARGETS, dy)):
+                    skipped += 1  # nhảy số bất thường (cắm lại cảm biến...) -> không phải diễn biến thật
+                    continue
+                # khi học: thời tiết lúc τ + h là số đo thật (thay cho dự báo)
+                x = _features(r, r, w_at(t_mid), w_at(t_mid + hz * 3600), t_mid, hz)
+                if x is not None:
+                    X.append(x)
+                    Y.append(dy)
+                    T.append(b)
+                    HZ.append(hz)
+        return (np.array(X, dtype=float), np.array(Y, dtype=float), np.array(T, dtype=float),
+                np.array(HZ, dtype=int), skipped + len(bad))
 
     # ------------------------------------------------------------------ huấn luyện + kiểm chứng
+    @staticmethod
+    def _folds(T, HZ):
+        """Walk-forward theo thời gian: chia khoảng thời gian thành FOLDS + 1 đoạn, thử lần lượt trên các đoạn sau;
+        tập học chỉ gồm mẫu mà kết quả (lúc τ + h) đã có TRƯỚC khi đoạn thử bắt đầu."""
+        t0, t1 = T.min(), T.max() + STEP
+        edges = np.linspace(t0, t1, FOLDS + 2)
+        out = []
+        for a, b in zip(edges[1:-1], edges[2:]):
+            te = np.where((T >= a) & (T < b))[0]
+            tr = np.where(T + STEP + HZ * 3600 <= a)[0]
+            if len(tr) >= MIN_TRAIN and len(te) >= MIN_TEST:
+                out.append((tr, te))
+        return out
+
     def train(self, now=None):
         now = now or time.time()
         self.last_train = now
         if RandomForestRegressor is None:
             self.info["note"] = "Chưa cài scikit-learn"
             return
-        X, Y, T, skipped = self._dataset(now)
+        X, Y, T, HZ, skipped = self._dataset(now)
         self.info.update(samples=len(X), skipped=skipped,
-                         period=[T[0], T[-1] + 3600] if T else None)
-        if len(X) < MIN_SAMPLES:
+                         period=[float(T.min()), float(T.max()) + STEP] if len(T) else None)
+        folds = self._folds(T, HZ) if len(X) >= MIN_SAMPLES else []
+        if len(folds) < 2:
             self.model, self.eval = None, {}
+            need = max(0, MIN_SAMPLES - len(X))
             self.info.update(trained=False, validated=False, evaluation=[], importance=[], note=(
-                f"Đang thu thập: {len(X)}/{MIN_SAMPLES} mẫu (mỗi mẫu = 1 giờ có đủ cảm biến 3 giờ sau + thời tiết)"
-                + (f"; đã loại {skipped} giờ cảm biến lỗi/nhảy số" if skipped else "")
+                f"Đang thu thập: {len(X)}/{MIN_SAMPLES} mẫu"
+                + (f" (còn khoảng {max(1, round(need / 12))} giờ máy chủ chạy liên tục)" if need
+                   else " — cần thêm dữ liệu theo thời gian để kiểm chứng")
+                + (f"; đã loại {skipped} đoạn cảm biến lỗi/nhảy số" if skipped else "")
                 + ". Chưa dự báo khi chưa kiểm chứng được."))
             return
 
-        # Walk-forward: học trên quá khứ, thử trên các giờ ngay sau đó; chừa 3 giờ để tránh rò rỉ dữ liệu
-        splits = min(5, len(X) // 12)
-        err_m, err_b = [], []
-        for tr, te in TimeSeriesSplit(n_splits=splits, gap=max(HORIZONS)).split(X):
+        err_m, err_b, hz_te = [], [], []
+        for tr, te in folds:
             m = RandomForestRegressor(**RF_PARAMS).fit(X[tr], Y[tr])
             err_m.append(np.abs(m.predict(X[te]) - Y[te]))
             err_b.append(np.abs(Y[te]))   # mốc chuẩn "giữ nguyên": thay đổi dự báo = 0
-        err_m, err_b = np.vstack(err_m), np.vstack(err_b)
+            hz_te.append(HZ[te])
+        err_m, err_b, hz_te = np.vstack(err_m), np.vstack(err_b), np.concatenate(hz_te)
         self.eval, table = {}, []
-        for j, (hz, k) in enumerate(OUTPUTS):
-            mae, mae_b = float(err_m[:, j].mean()), float(err_b[:, j].mean())
-            skill = (1 - mae / mae_b) * 100 if mae_b > 1e-9 else 0.0
-            e = {"mae": mae, "mae_base": mae_b, "skill": skill, "use_rf": skill > 0,
-                 "q80": float(np.quantile(err_m[:, j], 0.8)), "q80_base": float(np.quantile(err_b[:, j], 0.8))}
-            self.eval[(hz, k)] = e
-            table.append({"hours": hz, "key": k, "mae": round(mae, 3), "mae_base": round(mae_b, 3),
-                          "skill": round(skill), "use_rf": e["use_rf"]})
+        for hz in HORIZONS:
+            sel = hz_te == hz
+            for j, k in enumerate(TARGETS):
+                if not sel.any():
+                    continue
+                em, eb = err_m[sel, j], err_b[sel, j]
+                mae, mae_b = float(em.mean()), float(eb.mean())
+                skill = (1 - mae / mae_b) * 100 if mae_b > 1e-9 else 0.0
+                e = {"mae": mae, "mae_base": mae_b, "skill": skill, "use_rf": skill > 0,
+                     "q80": float(np.quantile(em, 0.8)), "q80_base": float(np.quantile(eb, 0.8))}
+                self.eval[(hz, k)] = e
+                table.append({"hours": hz, "key": k, "mae": round(mae, 3), "mae_base": round(mae_b, 3),
+                              "skill": round(skill), "use_rf": e["use_rf"], "n": int(sel.sum())})
 
         model = RandomForestRegressor(**RF_PARAMS).fit(X, Y)
         imp = dict(zip(FEATURES, model.feature_importances_))
@@ -159,13 +186,13 @@ class RFAnalyzer:
         better = sum(1 for e in self.eval.values() if e["use_rf"])
         self.info.update(
             trained=True, validated=True, trained_at=now, evaluation=table,
-            test_samples=int(len(err_m)), folds=splits,
+            test_samples=int(len(err_m)), folds=len(folds),
             importance=[{"name": n, "pct": round(v * 100)} for n, v in groups if v >= 0.03][:5],
-            note=(f"Học từ {len(X)} mẫu giờ, kiểm chứng walk-forward {splits} lần trên {len(err_m)} giờ chưa thấy; "
-                  f"mô hình tốt hơn mốc 'giữ nguyên' ở {better}/{len(OUTPUTS)} chỉ số × mốc giờ"
-                  + (f"; đã loại {skipped} giờ cảm biến lỗi" if skipped else "")),
+            note=(f"Học từ {len(X)} mẫu, kiểm chứng walk-forward {len(folds)} lần trên {len(err_m)} mẫu chưa thấy; "
+                  f"mô hình tốt hơn mốc 'giữ nguyên' ở {better}/{len(self.eval)} chỉ số × mốc giờ"
+                  + (f"; đã loại {skipped} đoạn cảm biến lỗi" if skipped else "")),
         )
-        log.info("Random Forest: %d mẫu, %d lần kiểm chứng, tốt hơn mốc chuẩn %d/%d", len(X), splits, better, len(OUTPUTS))
+        log.info("Random Forest: %d mẫu, %d lần kiểm chứng, tốt hơn mốc chuẩn %d/%d", len(X), len(folds), better, len(self.eval))
 
     # ------------------------------------------------------------------ dự báo
     def analyze(self, recent_rows, data, now=None):
@@ -175,23 +202,26 @@ class RFAnalyzer:
             self.train(now)
         th = thresholds(data)
         live = {k: num(data.get(k)) for k in INDOOR}
-        rows = [r for r in recent_rows if r["ts"] >= now - STATE_SEC] or recent_rows[-1:]
+        rows = [r for r in recent_rows if r["ts"] >= now - STEP] or recent_rows[-1:]
         state = {k: _mean(rows, k) for k in INDOOR}       # đầu vào: trung bình 15 phút (giống lúc học)
         devices = {k: _mean(rows, k) or 0 for k in DEVICES}
+        t_mid = now - STEP / 2
         predictions = []
-        x = _features(state, devices, self.weather.at, int(now // 3600 * 3600)) if self.model is not None else None
-        if x is not None:
-            dy = dict(zip(OUTPUTS, self.model.predict(np.array([x], dtype=float))[0]))
+        if self.model is not None:
             for hz in HORIZONS:
+                x = _features(state, devices, self.weather.at(t_mid), self.weather.at(t_mid + hz * 3600), t_mid, hz)
+                if x is None:
+                    break
+                dy = dict(zip(TARGETS, self.model.predict(np.array([x], dtype=float))[0]))
                 row = {"hours": hz, "range": {}, "basis": {}}
                 for k in TARGETS:
                     base = live[k] if is_valid(k, live[k]) else state[k]
-                    if base is None or (k == "GT_AMDAT" and (live[k] or 0) <= 0.5):
+                    e = self.eval.get((hz, k))
+                    if base is None or e is None or (k == "GT_AMDAT" and (live[k] or 0) <= 0.5):
                         row[k] = None   # độ ẩm đất 0% = cảm biến lỗi -> không dự báo
                         continue
-                    e = self.eval[(hz, k)]
                     lo, hi = SENSORS[k]["phys"]
-                    value = base + float(dy[(hz, k)]) if e["use_rf"] else base
+                    value = base + float(dy[k]) if e["use_rf"] else base
                     err = e["q80"] if e["use_rf"] else e["q80_base"]
                     digits = 2 if k == "GT_PH" else 1
                     row[k] = round(min(max(value, lo), hi), digits)
@@ -229,7 +259,15 @@ class RFAnalyzer:
         tips, out_now = [], False
         for k, out_of, limit_text, soon_action, now_action in rules:
             v_now = live.get(k)
-            if not out_of or v_now is None or (k == "GT_AMDAT" and v_now <= 0.5):
+            if k == "GT_AMDAT" and v_now is not None and v_now <= 0.5:
+                # đúng 0%: gần như chắc chắn cảm biến chưa cắm vào đất/đứt dây, nhưng firmware vẫn bơm theo số này
+                out_now = True
+                tips.append("Độ ẩm đất đang báo 0%" + (f" (dưới ngưỡng {fmt(k, th['SET_AMDAT'])}) — máy bơm đang bật "
+                            "theo ngưỡng và có thể chạy liên tục" if th["SET_AMDAT"] else "")
+                            + ". Giá trị đúng 0% thường do cảm biến chưa cắm vào đất hoặc đứt dây — kiểm tra cảm biến "
+                            "(chưa dự báo độ ẩm đất khi cảm biến báo 0%).")
+                continue
+            if not out_of or v_now is None:
                 continue
             series = [(p["hours"], p[k]) for p in predictions
                       if p.get(k) is not None and p["basis"].get(k) == "rf"]
@@ -254,8 +292,6 @@ class RFAnalyzer:
         hot = max((w.get("temp") or 0 for w in nxt), default=0)
         if hot >= 35:
             tips.append(f"Ngoài trời nắng nóng tới {hot:.0f}°C trong 3 giờ tới.")
-        if predictions and (live.get("GT_AMDAT") or 0) <= 0.5:
-            tips.append("Độ ẩm đất đang báo 0% — cảm biến có thể chưa cắm/đứt dây nên chưa dự báo độ ẩm đất.")
         if not predictions and not out_now:
             tips.append("Các chỉ số đang trong ngưỡng. Chưa dự báo 3 giờ tới vì mô hình chưa đủ dữ liệu để kiểm chứng.")
         elif not tips:

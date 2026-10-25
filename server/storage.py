@@ -96,6 +96,19 @@ class Storage:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def bucket_readings(self, since_ts, size=900, min_samples=10):
+        """Trung bình từng khoảng `size` giây (mặc định 15 phút) của cảm biến + tỉ lệ bật thiết bị.
+        Trả dict: thời điểm đầu khoảng -> bản ghi trung bình (bỏ khoảng có ít hơn min_samples lần đọc)."""
+        sensors = ", ".join(f'AVG("{k}") AS "{k}"' for k in SENSOR_KEYS)
+        devices = ", ".join(f'AVG("{k}") AS "{k}"' for k in DEVICE_KEYS)
+        with self.lock:
+            rows = self.conn.execute(
+                f"""SELECT CAST(ts / ? AS INTEGER) * ? AS b, COUNT(*) AS n, {sensors}, {devices}
+                    FROM readings WHERE ts >= ? GROUP BY b HAVING n >= ? ORDER BY b""",
+                (size, size, since_ts, min_samples),
+            ).fetchall()
+        return {int(r["b"]): dict(r) for r in rows}
+
     # ---------- thời tiết ngoài trời (theo giờ) ----------
     def add_weather(self, rows):
         with self.lock, self.conn:
