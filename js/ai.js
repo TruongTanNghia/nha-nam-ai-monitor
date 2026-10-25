@@ -154,7 +154,16 @@ export function renderAnalysis() {
 }
 
 /* ================= Random Forest + thời tiết (chỉ tham khảo) ================= */
-const RF_TARGETS = [["t", "Nhiệt độ", "SET_T", 1], ["h", "Độ ẩm KK", "SET_H", -1], ["GT_AMDAT", "Độ ẩm đất", "SET_AMDAT", -1]];
+/** [chỉ số, tên, hàm "ngoài ngưỡng"(giá trị, ngưỡng đang cài)] — ngưỡng 0 = chưa cài */
+const over = (key) => (v, th) => Number(th[key]) > 0 && v > Number(th[key]);
+const under = (key) => (v, th) => Number(th[key]) > 0 && v < Number(th[key]);
+const RF_TARGETS = [
+  ["t", "Nhiệt độ", over("SET_T")],
+  ["h", "Độ ẩm KK", under("SET_H")],
+  ["GT_AMDAT", "Độ ẩm đất", under("SET_AMDAT")],
+  ["GT_PH", "pH", (v, th) => under("SET_PHLOW")(v, th) || over("SET_PHHIGH")(v, th)],
+  ["GT_DOMAN", "Độ mặn", over("SET_DOMAN")],
+];
 const fmtHour = (ts) => new Date(ts * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 
 function weatherNowHTML(w) {
@@ -189,9 +198,8 @@ function renderRF() {
       </div>`;
   } else {
     const head = `<div></div><div class="rf-col">Bây giờ</div>` + rf.predictions.map((p) => `<div class="rf-col">+${p.hours} giờ</div>`).join("");
-    const rows = RF_TARGETS.map(([k, name, setKey, dir]) => {
-      const lim = Number(th[setKey]) || 0;
-      const bad = (v) => lim && v !== null && (dir > 0 ? v > lim : v < lim);
+    const rows = RF_TARGETS.map(([k, name, outOf]) => {
+      const bad = (v) => v !== null && v !== undefined && outOf(v, th);
       const cell = (v) => `<div class="rf-val ${bad(v) ? "warn" : ""}">${v === null || v === undefined ? "—" : fmtWithUnit(k, v)}</div>`;
       return `<div class="rf-name"><span class="swatch" style="background:var(${SENSOR_BY_KEY[k].color})"></span>${name}</div>`
         + cell(th[k] !== undefined && th[k] !== null ? Number(th[k]) : rf.now?.[k]) +rf.predictions.map((p) => cell(p[k])).join("");  // "Bây giờ" = số đo mới nhất
@@ -225,7 +233,7 @@ function renderRFModel() {
   if (!backend.online) return setHTML(el, offlineHTML());
   const rf = backend.snapshot?.rf;
   if (!rf) return setHTML(el, "");
-  const UNIT = { t: "°C", h: "%", GT_AMDAT: "%" };
+  const UNIT = { t: "°C", h: "%", GT_AMDAT: "%", GT_PH: "", GT_DOMAN: " ppm" };
   const mae = Object.entries(rf.mae || {}).map(([k, v]) => `${SENSOR_BY_KEY[k].name.toLowerCase()} ±${v}${UNIT[k]}`).join(", ");
   setHTML(el, `
     <div class="ml-state ${rf.trained ? "normal" : "learning"}">${icon(rf.trained ? "shield-check" : "loader")} ${rf.trained ? "Đã huấn luyện" : "Đang học dữ liệu"}</div>
