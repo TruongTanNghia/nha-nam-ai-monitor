@@ -190,21 +190,30 @@ function renderRF() {
   if (backend.hardwareOffline) {
     body = emptyState("unplug", "Tạm dừng phân tích", "ESP32 đang mất kết nối nên số liệu trong nhà đã cũ.");
   } else if (!rf?.predictions?.length) {
-    const pct = Math.min(100, Math.round(((rf?.samples || 0) / 24) * 100));
+    const pct = Math.min(100, Math.round(((rf?.samples || 0) / 36) * 100));
     body = `
       <div class="rf-learning">
-        ${icon("loader")}<div><b>Random Forest đang học</b><small>${esc(rf?.note || "Đang chờ dữ liệu")}</small>
+        ${icon("loader")}<div><b>Đang thu thập dữ liệu để kiểm chứng</b><small>${esc(rf?.note || "Đang chờ dữ liệu")}</small>
         <div class="meter"><span style="width:${pct}%"></span></div></div>
       </div>`;
   } else {
     const head = `<div></div><div class="rf-col">Bây giờ</div>` + rf.predictions.map((p) => `<div class="rf-col">+${p.hours} giờ</div>`).join("");
     const rows = RF_TARGETS.map(([k, name, outOf]) => {
       const bad = (v) => v !== null && v !== undefined && outOf(v, th);
-      const cell = (v) => `<div class="rf-val ${bad(v) ? "warn" : ""}">${v === null || v === undefined ? "—" : fmtWithUnit(k, v)}</div>`;
+      const cell = (v, p) => {
+        if (v === null || v === undefined) return `<div class="rf-val">—</div>`;
+        const persist = p?.basis?.[k] === "persist";
+        const r = p?.range?.[k];
+        const tip = persist ? "Mô hình chưa dự báo tốt hơn cách 'giữ nguyên giá trị' cho chỉ số này nên hiển thị giá trị hiện tại"
+          : r ? `80% khả năng nằm trong ${fmtWithUnit(k, r[0])} – ${fmtWithUnit(k, r[1])} (theo sai số kiểm chứng)` : "";
+        return `<div class="rf-val ${bad(v) ? "warn" : ""} ${persist ? "persist" : ""}" title="${esc(tip)}">${fmtWithUnit(k, v)}${persist ? "<i>=</i>" : ""}`
+          + (r && !persist ? `<small>±${fmtNum(k, (r[1] - r[0]) / 2)}</small>` : "") + `</div>`;
+      };
       return `<div class="rf-name"><span class="swatch" style="background:var(${SENSOR_BY_KEY[k].color})"></span>${name}</div>`
-        + cell(th[k] !== undefined && th[k] !== null ? Number(th[k]) : rf.now?.[k]) +rf.predictions.map((p) => cell(p[k])).join("");  // "Bây giờ" = số đo mới nhất
+        + cell(th[k] !== undefined && th[k] !== null ? Number(th[k]) : rf.now?.[k]) + rf.predictions.map((p) => cell(p[k], p)).join("");  // "Bây giờ" = số đo mới nhất
     }).join("");
-    body = `<div class="rf-table" style="--cols:${rf.predictions.length + 1}">${head}${rows}</div>`;
+    body = `<div class="rf-table" style="--cols:${rf.predictions.length + 1}">${head}${rows}</div>
+      <p class="rf-legend"><b>±</b> sai số 80% đo được khi kiểm chứng · <b>=</b> mô hình chưa hơn cách "giữ nguyên giá trị" nên hiển thị giá trị hiện tại</p>`;
   }
   const advice = rf?.advice?.length && !backend.hardwareOffline
     ? `<ul class="rf-advice">${rf.advice.map((t) => `<li>${icon("lightbulb")}<span>${esc(t)}</span></li>`).join("")}</ul>` : "";
@@ -228,25 +237,42 @@ function renderWeather() {
     + `<p class="note">Vị trí: ${esc(w.location?.name || "?")} (${w.location?.lat?.toFixed(2)}, ${w.location?.lon?.toFixed(2)}) — đặt WEATHER_LAT/WEATHER_LON trong server/.env nếu chưa đúng.</p>`);
 }
 
+/** Số gọn theo độ chính xác của cảm biến (pH 2 chữ số, còn lại 1) */
+const fmtNum = (k, v) => (k === "GT_PH" ? v.toFixed(2) : v < 10 ? v.toFixed(1) : Math.round(v).toString());
+
 function renderRFModel() {
   const el = $("#rfModel");
   if (!backend.online) return setHTML(el, offlineHTML());
   const rf = backend.snapshot?.rf;
   if (!rf) return setHTML(el, "");
   const UNIT = { t: "°C", h: "%", GT_AMDAT: "%", GT_PH: "", GT_DOMAN: " ppm" };
-  const mae = Object.entries(rf.mae || {}).map(([k, v]) => `${SENSOR_BY_KEY[k].name.toLowerCase()} ±${v}${UNIT[k]}`).join(", ");
+  const period = rf.period ? `${fmtDateTime(rf.period[0] * 1000)} → ${fmtDateTime(rf.period[1] * 1000)}` : "—";
+  const ev = rf.evaluation || [];
+  const evalTable = ev.length ? `
+    <div class="meter-label"><span>Kiểm chứng trên dữ liệu chưa thấy (sai số trung bình)</span></div>
+    <div class="rf-eval">
+      <div></div>${[1, 2, 3].map((h) => `<div class="rf-col">+${h} giờ</div>`).join("")}
+      ${RF_TARGETS.map(([k, name]) => `<div class="rf-name">${name}</div>` + [1, 2, 3].map((h) => {
+        const e = ev.find((x) => x.key === k && x.hours === h);
+        if (!e) return `<div class="rf-val">—</div>`;
+        return `<div class="rf-val ${e.use_rf ? "good" : "persist"}" title="Random Forest: ${fmtNum(k, e.mae)}${UNIT[k]} · giữ nguyên: ${fmtNum(k, e.mae_base)}${UNIT[k]}">`
+          + `±${fmtNum(k, e.mae)}${UNIT[k]}<small>${e.skill > 0 ? "+" : ""}${e.skill}%</small></div>`;
+      }).join("")).join("")}
+    </div>
+    <p class="note">% = mô hình tốt hơn (+) hay kém hơn (−) cách dự báo "giữ nguyên giá trị hiện tại". Ô kém hơn thì web hiển thị giá trị giữ nguyên.</p>` : "";
   setHTML(el, `
-    <div class="ml-state ${rf.trained ? "normal" : "learning"}">${icon(rf.trained ? "shield-check" : "loader")} ${rf.trained ? "Đã huấn luyện" : "Đang học dữ liệu"}</div>
+    <div class="ml-state ${rf.validated ? "normal" : "learning"}">${icon(rf.validated ? "shield-check" : "loader")} ${rf.validated ? "Đã huấn luyện và kiểm chứng" : "Đang thu thập dữ liệu để kiểm chứng"}</div>
     <dl class="kv">
-      <div><dt>Thuật toán</dt><dd>Random Forest (200 cây)</dd></div>
-      <div><dt>Dữ liệu huấn luyện</dt><dd>${rf.samples ?? 0} giờ (cảm biến + thời tiết)</dd></div>
+      <div><dt>Phương pháp</dt><dd>${esc(rf.method || "Random Forest")}</dd></div>
+      <div><dt>Dữ liệu</dt><dd>${rf.samples ?? 0} mẫu giờ${rf.skipped ? ` (đã loại ${rf.skipped} giờ cảm biến lỗi)` : ""} · ${period}</dd></div>
+      ${rf.validated ? `<div><dt>Kiểm chứng</dt><dd>Walk-forward ${rf.folds} lần, ${rf.test_samples} giờ thử</dd></div>` : ""}
       <div><dt>Lần huấn luyện</dt><dd>${rf.trained_at ? timeAgo(rf.trained_at * 1000) : "—"}</dd></div>
-      ${mae ? `<div><dt>Sai số trung bình (1 giờ tới)</dt><dd>${esc(mae)}</dd></div>` : ""}
     </dl>
+    ${evalTable}
     ${rf.importance?.length ? `<div class="meter-label"><span>Yếu tố ảnh hưởng nhiều nhất</span></div>
       <div class="rf-imp">${rf.importance.map((i) => `
         <div><span>${esc(i.name)}</span><div class="meter"><span style="width:${i.pct}%"></span></div><b>${i.pct}%</b></div>`).join("")}</div>` : ""}
-    <p class="note">${esc(rf.note || "")}. Kết quả chỉ để tham khảo, thiết bị vẫn bật/tắt theo ngưỡng cài đặt.</p>`);
+    <p class="note">${esc(rf.note || "")}. Kết quả chỉ để tham khảo, thiết bị vẫn bật/tắt theo ngưỡng cài đặt. Phương pháp: docs/PHUONG_PHAP_DU_BAO.md</p>`);
 }
 
 function fmtDuration(sec) {

@@ -252,6 +252,12 @@ svg.lucide { width: 18px; height: 18px; stroke-width: 1.9; flex-shrink: 0; }
 .rf-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; }
 .rf-val { text-align: center; font-family: var(--font-mono); font-size: 14px; padding: 6px 4px; border-radius: 8px; background: var(--surface-2); }
 .rf-val.warn { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+.rf-val small { display: block; font-size: 10.5px; color: var(--ink-3); font-weight: 500; }
+.rf-val.persist { color: var(--ink-3); }
+.rf-val i { font-style: normal; margin-left: 3px; color: var(--ink-3); }
+.rf-val.good small { color: var(--ok); }
+.rf-legend { margin: 0; font-size: 12px; color: var(--ink-3); }
+.rf-eval { display: grid; grid-template-columns: minmax(90px, 1.2fr) repeat(3, minmax(0, 1fr)); gap: 5px 6px; align-items: center; margin: 6px 0; }
 .rf-advice { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .rf-advice li { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--ink-2); }
 .rf-advice svg { width: 16px; height: 16px; color: var(--warn); flex: none; margin-top: 1px; }

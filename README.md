@@ -74,6 +74,7 @@ pH và độ mặn **không trung bình hóa** với nhiệt độ hay ánh sán
 - **Thiết bị**: bơm chạy 8 phút mà đất không ẩm lên, quạt 15 phút không hạ nhiệt, phun sương không tăng ẩm, đèn bật không sáng hơn, màn che nhận cả MỞ & ĐÓNG, bật/tắt liên tục (≥ 6 lần/10 phút), bơm/phun sương chạy quá lâu.
 
 ### Random Forest + thời tiết ngoài trời (server/rf_model.py, server/weather.py) — CHỈ THAM KHẢO
+Phương pháp, kiểm chứng và hạn chế: [docs/PHUONG_PHAP_DU_BAO.md](docs/PHUONG_PHAP_DU_BAO.md).
 **Thiết bị luôn bật/tắt theo ngưỡng** cài trên web (firmware ESP32); phần này không điều khiển gì.
 - **Thời tiết**: lấy từ [Open-Meteo](https://open-meteo.com) (miễn phí, không cần key) 15 phút/lần — nhiệt độ, độ ẩm, mây, bức xạ mặt trời, mưa, gió (31 ngày qua + 2 ngày tới). Vị trí theo `WEATHER_LAT`/`WEATHER_LON`, để trống thì đoán theo IP mạng.
 - **Một mô hình Random Forest** (200 cây, scikit-learn) học từ dữ liệu theo giờ: chỉ số trong nhà + thiết bị đang chạy + thời tiết giờ này và giờ tới + giờ trong ngày → **mức thay đổi trong 1 giờ** của nhiệt độ, độ ẩm không khí, độ ẩm đất, **pH, độ mặn**. Dự đoán = số đo hiện tại + mức thay đổi, lặp 3 bước cho **1–3 giờ tới**; mỗi bước bị giới hạn trong mức thay đổi thực tế đã thấy (không nhảy 100% → 48%). Giờ có cảm biến lỗi (độ ẩm đất 0%, nhảy số khi cắm lại) bị loại khi học. Học lại mỗi giờ; cần ≥ 24 giờ dữ liệu (máy chủ chạy ít nhất ~1 ngày). Web hiện sai số trung bình và các yếu tố ảnh hưởng nhiều nhất.
