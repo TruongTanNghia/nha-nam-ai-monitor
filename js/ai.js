@@ -161,6 +161,7 @@ const RF_TARGETS = [
   ["t", "Nhiệt độ", over("SET_T")],
   ["h", "Độ ẩm KK", under("SET_H")],
   ["GT_AMDAT", "Độ ẩm đất", under("SET_AMDAT")],
+  ["ANHSANG", "Ánh sáng", under("SET_AS")],
   ["GT_PH", "pH", (v, th) => under("SET_PHLOW")(v, th) || over("SET_PHHIGH")(v, th)],
   ["GT_DOMAN", "Độ mặn", over("SET_DOMAN")],
 ];
@@ -243,7 +244,7 @@ function renderRFModel() {
   if (!backend.online) return setHTML(el, offlineHTML());
   const rf = backend.snapshot?.rf;
   if (!rf) return setHTML(el, "");
-  const UNIT = { t: "°C", h: "%", GT_AMDAT: "%", GT_PH: "", GT_DOMAN: " ppm" };
+  const UNIT = { t: "°C", h: "%", GT_AMDAT: "%", ANHSANG: " lux", GT_PH: "", GT_DOMAN: " ppm" };
   const period = rf.period ? `${fmtDateTime(rf.period[0] * 1000)} → ${fmtDateTime(rf.period[1] * 1000)}` : "—";
   const ev = rf.evaluation || [];
   const evalTable = ev.length ? `

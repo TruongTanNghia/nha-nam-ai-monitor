@@ -5,7 +5,7 @@ Thiết bị vẫn bật/tắt theo ngưỡng (firmware ESP32). Phương pháp c
 Tóm tắt:
 - Dữ liệu: cứ 15 phút lấy 1 "trạng thái" = trung bình 15 phút của nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng,
   pH, độ mặn, tỉ lệ bật thiết bị; ghép thời tiết Open-Meteo lúc đó và lúc cần dự báo.
-- Mẫu = (trạng thái lúc τ, mốc h ∈ {1,2,3} giờ) -> mức thay đổi của 5 chỉ số tới lúc τ + h.
+- Mẫu = (trạng thái lúc τ, mốc h ∈ {1,2,3} giờ) -> mức thay đổi của 6 chỉ số tới lúc τ + h.
 - Làm sạch: bỏ trạng thái có cảm biến ngoài khoảng vật lý, độ ẩm đất đúng 0% (cảm biến chưa cắm/đứt dây),
   và mẫu có thay đổi vượt mức vật lý hợp lý (nhảy số khi cắm lại cảm biến).
 - Mô hình: MỘT RandomForestRegressor, mốc giờ h là một biến đầu vào, dự báo TRỰC TIẾP từng mốc
@@ -35,11 +35,12 @@ INDOOR = ["t", "h", "GT_AMDAT", "ANHSANG", "GT_PH", "GT_DOMAN"]
 DEVICES = ["QUAT", "SUONG", "BOM", "DEN", "MO"]
 OUT = ["temp", "hum", "cloud", "rad", "precip", "wind"]   # thời tiết lúc hiện tại
 OUT_FUT = ["temp", "hum", "rad", "precip"]                 # thời tiết lúc cần dự báo (dự báo Open-Meteo)
-TARGETS = ["t", "h", "GT_AMDAT", "GT_PH", "GT_DOMAN"]
+TARGETS = ["t", "h", "GT_AMDAT", "ANHSANG", "GT_PH", "GT_DOMAN"]
 HORIZONS = (1, 2, 3)
 OUTPUTS = [(hz, k) for hz in HORIZONS for k in TARGETS]
 # Thay đổi lớn nhất hợp lý trong 1 giờ trong nhà nấm; vượt quá = lỗi cảm biến, bỏ khi học
-MAX_JUMP = {"t": 6.0, "h": 25.0, "GT_AMDAT": 25.0, "GT_PH": 1.0, "GT_DOMAN": 300.0}
+# ánh sáng đổi rất nhanh (mây, bật/tắt đèn, ngày/đêm) -> không lọc theo mức thay đổi
+MAX_JUMP = {"t": 6.0, "h": 25.0, "GT_AMDAT": 25.0, "ANHSANG": 70000.0, "GT_PH": 1.0, "GT_DOMAN": 300.0}
 
 FEATURES = (INDOOR + DEVICES + [f"o_{k}" for k in OUT] + [f"f_{k}" for k in OUT_FUT]
             + ["hour_sin", "hour_cos", "horizon"])
@@ -75,8 +76,10 @@ def _features(state, devices, w_now, w_fut, t_mid, hz):
 
 
 def _clean(r):
-    """Trạng thái dùng được: mọi chỉ số trong khoảng vật lý; độ ẩm đất đúng 0% = cảm biến chưa cắm/đứt dây."""
-    return r is not None and all(is_valid(k, r.get(k)) for k in INDOOR) and r["GT_AMDAT"] > 0.5
+    """Trạng thái dùng được: mọi chỉ số trong khoảng vật lý. Độ ẩm đất 0% (cảm biến chưa cắm) KHÔNG loại cả mẫu —
+    nhiệt độ, độ ẩm, ánh sáng... vẫn dùng được; lúc rút/cắm lại cảm biến (0% <-> 100%) bị lọc bởi MAX_JUMP,
+    và khi đất đang báo 0% thì không dự báo đất."""
+    return r is not None and all(is_valid(k, r.get(k)) for k in INDOOR)
 
 
 class RFAnalyzer:
@@ -253,6 +256,9 @@ class RFAnalyzer:
              f"dưới ngưỡng {fmt('h', th['SET_H'])}", "phun sương sẽ bật theo ngưỡng", "phun sương đang bật theo ngưỡng"),
             ("GT_AMDAT", (lambda v: v < th["SET_AMDAT"]) if th["SET_AMDAT"] else None,
              f"dưới ngưỡng {fmt('GT_AMDAT', th['SET_AMDAT'])}", "máy bơm sẽ bật theo ngưỡng", "máy bơm đang bật theo ngưỡng"),
+            ("ANHSANG", (lambda v: v < th["SET_AS"]) if th["SET_AS"] else None,
+             f"dưới ngưỡng {fmt('ANHSANG', th['SET_AS'])}", "đèn sẽ bật và màn che mở theo ngưỡng",
+             "đèn đang bật và màn che đang mở theo ngưỡng"),
             ("GT_PH", (lambda v: (lo_ph and v < lo_ph) or (hi_ph and v > hi_ph)) if (lo_ph or hi_ph) else None,
              f"ngoài khoảng {lo_ph or '—'}–{hi_ph or '—'}", "máy bơm và phun sương sẽ bị khóa; kiểm tra nước cấp",
              "máy bơm và phun sương đang bị khóa; kiểm tra nước cấp"),
@@ -311,7 +317,7 @@ def report_lines(result):
         return ([f"🌲 Random Forest: {result.get('note') or 'chưa có dự báo'}"]
                 + [f"👉 {tip}" for tip in result.get("advice") or []])
     lines = ["🌲 Dự báo Random Forest (tham khảo — thiết bị vẫn bật/tắt theo ngưỡng):"]
-    icons = {"t": "🌡", "h": "💧", "GT_AMDAT": "🌱", "GT_PH": "⚗️ pH", "GT_DOMAN": "🧂"}
+    icons = {"t": "🌡", "h": "💧", "GT_AMDAT": "🌱", "ANHSANG": "☀️", "GT_PH": "⚗️ pH", "GT_DOMAN": "🧂"}
     for p in result["predictions"]:
         cells = [f"{icons[k]} {fmt(k, p.get(k))}" for k in TARGETS]
         lines.append(f"• +{p['hours']} giờ: " + " | ".join(cells))

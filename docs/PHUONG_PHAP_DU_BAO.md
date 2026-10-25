@@ -5,7 +5,7 @@ Mã nguồn: [server/rf_model.py](../server/rf_model.py). Kết quả kiểm ch�
 > Dự báo **chỉ để tham khảo**. Thiết bị (quạt, phun sương, bơm, đèn, màn che) luôn bật/tắt theo **ngưỡng** cài đặt trong firmware ESP32.
 
 ## 1. Bài toán
-Dự báo sau **1, 2 và 3 giờ** cho 5 chỉ số trong nhà nấm: nhiệt độ, độ ẩm không khí, độ ẩm giá thể (đất), pH và độ mặn của nước cấp. Mục đích là chuẩn bị trước, ví dụ kiểm tra nước cho béc phun khi độ ẩm sắp xuống dưới ngưỡng.
+Dự báo sau **1, 2 và 3 giờ** cho 6 chỉ số trong nhà nấm: nhiệt độ, độ ẩm không khí, độ ẩm giá thể (đất), ánh sáng, pH và độ mặn của nước cấp. Mục đích là chuẩn bị trước, ví dụ kiểm tra nước cho béc phun khi độ ẩm sắp xuống dưới ngưỡng.
 
 ## 2. Dữ liệu
 | Nguồn | Nội dung | Tần suất |
@@ -15,14 +15,14 @@ Dự báo sau **1, 2 và 3 giờ** cho 5 chỉ số trong nhà nấm: nhiệt đ
 
 **Trạng thái:** cứ 15 phút lấy trung bình các lần đo trong 15 phút đó (lọc nhiễu của cảm biến, vẫn bám kịp khi chỉ số đổi nhanh).
 
-**Mẫu dữ liệu:** một mẫu = (trạng thái lúc τ, mốc dự báo h ∈ {1, 2, 3} giờ) → mức thay đổi của 5 chỉ số từ τ tới τ + h. Mỗi trạng thái cho tối đa 3 mẫu; chỉ cần có số liệu lúc τ + h là dùng được, không bắt buộc đủ cả 3 giờ liên tục.
+**Mẫu dữ liệu:** một mẫu = (trạng thái lúc τ, mốc dự báo h ∈ {1, 2, 3} giờ) → mức thay đổi của 6 chỉ số từ τ tới τ + h. Mỗi trạng thái cho tối đa 3 mẫu; chỉ cần có số liệu lúc τ + h là dùng được, không bắt buộc đủ cả 3 giờ liên tục.
 
 ## 3. Làm sạch dữ liệu (quy tắc cố định, không chỉnh tay)
 Một trạng thái 15 phút bị **loại** nếu:
 1. Có ít hơn 10 lần đo, hoặc có chỉ số nằm ngoài khoảng vật lý của cảm biến (ví dụ độ ẩm ngoài 0–100%, pH ngoài 0–14).
-2. Độ ẩm đất đúng **0%**: cảm biến chưa cắm vào đất hoặc đứt dây.
+2. Riêng độ ẩm đất đúng **0%** (cảm biến chưa cắm vào đất hoặc đứt dây): không loại cả mẫu, vì các cảm biến khác vẫn đúng. Lúc rút/cắm lại (0% ↔ 100%) bị loại theo quy tắc nhảy số bên dưới, và khi đất đang báo 0% thì không dự báo độ ẩm đất.
 
-Một mẫu bị loại nếu thay đổi vượt mức vật lý hợp lý (mỗi giờ: nhiệt độ 6°C, độ ẩm 25%, độ ẩm đất 25%, pH 1, độ mặn 300 ppm). Thường đây là do rút/cắm lại cảm biến, không phải diễn biến thật.
+Một mẫu bị loại nếu thay đổi vượt mức vật lý hợp lý (mỗi giờ: nhiệt độ 6°C, độ ẩm 25%, độ ẩm đất 25%, pH 1, độ mặn 300 ppm; ánh sáng không lọc vì đổi rất nhanh theo mây, ngày/đêm, đèn). Thường đây là do rút/cắm lại cảm biến, không phải diễn biến thật.
 
 Số đoạn bị loại được hiển thị trên web.
 
@@ -36,7 +36,7 @@ Số đoạn bị loại được hiển thị trên web.
 
 ## 5. Mô hình
 - **Một** `RandomForestRegressor` (Breiman, 2001) nhiều đầu ra: 200 cây, độ sâu tối đa 10, tối thiểu 3 mẫu/lá.
-- **Đầu ra (5):** *mức thay đổi* của 5 chỉ số sau h giờ so với hiện tại; h là biến đầu vào nên một mô hình dự báo cả 3 mốc. Dự báo = số đo hiện tại + mức thay đổi.
+- **Đầu ra (6):** *mức thay đổi* của 6 chỉ số sau h giờ so với hiện tại; h là biến đầu vào nên một mô hình dự báo cả 3 mốc. Dự báo = số đo hiện tại + mức thay đổi.
   - Học *mức thay đổi* thay vì giá trị tuyệt đối: khi dữ liệu ít, mô hình không bị kéo về giá trị trung bình lịch sử.
   - Dự báo **trực tiếp** từng mốc giờ, không lặp từng bước: sai số không cộng dồn.
 - Học lại mỗi 15 phút trên toàn bộ dữ liệu 30 ngày gần nhất; dự báo tính lại mỗi 2 phút.
