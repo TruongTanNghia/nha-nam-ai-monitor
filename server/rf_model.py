@@ -310,10 +310,10 @@ def report_lines(result):
     if not result.get("predictions"):
         return ([f"🌲 Random Forest: {result.get('note') or 'chưa có dự báo'}"]
                 + [f"👉 {tip}" for tip in result.get("advice") or []])
-    lines = ["🌲 Dự báo Random Forest (tham khảo — thiết bị vẫn bật/tắt theo ngưỡng; '?' = chưa chắc, cần thêm dữ liệu):"]
+    lines = ["🌲 Dự báo Random Forest (tham khảo — thiết bị vẫn bật/tắt theo ngưỡng):"]
     icons = {"t": "🌡", "h": "💧", "GT_AMDAT": "🌱", "GT_PH": "⚗️ pH", "GT_DOMAN": "🧂"}
     for p in result["predictions"]:
-        cells = [f"{icons[k]} {fmt(k, p.get(k))}{'?' if p.get('basis', {}).get(k) == 'unproven' else ''}" for k in TARGETS]
+        cells = [f"{icons[k]} {fmt(k, p.get(k))}" for k in TARGETS]
         lines.append(f"• +{p['hours']} giờ: " + " | ".join(cells))
     lines += [f"👉 {tip}" for tip in result.get("advice") or []]
     best = [e for e in result.get("evaluation") or [] if e["hours"] == 1 and e["use_rf"]]

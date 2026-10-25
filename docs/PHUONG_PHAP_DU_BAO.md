@@ -48,14 +48,14 @@ Số đoạn bị loại được hiển thị trên web.
 - **Chỉ số đánh giá:**
   - MAE: sai số tuyệt đối trung bình, cùng đơn vị với chỉ số.
   - Skill (%) = (1 − MAE<sub>mô hình</sub> / MAE<sub>giữ nguyên</sub>) × 100. Dương nghĩa là mô hình tốt hơn.
-- **Quy tắc hiển thị:** với mỗi cặp (chỉ số, mốc giờ), nếu skill ≤ 0 thì dự báo vẫn hiển thị nhưng đánh dấu **“?” (chưa chắc)** và **không dùng để đưa gợi ý**. Người xem luôn biết con số nào đã được chứng minh tốt hơn cách đơn giản nhất.
+- **Quy tắc hiển thị:** với mỗi cặp (chỉ số, mốc giờ), nếu skill ≤ 0 thì dự báo vẫn hiển thị (một con số) nhưng **không dùng để đưa gợi ý**; bảng kiểm chứng ở tab Phân tích AI cho biết ô nào đã được chứng minh tốt hơn cách đơn giản nhất.
 - **Chưa kiểm chứng thì chưa dự báo:** cần tối thiểu 60 mẫu (khoảng 7–10 giờ máy chủ chạy liên tục) và ít nhất 2 lần kiểm chứng. Trước đó web ghi “Đang thu thập dữ liệu để kiểm chứng” kèm số giờ còn thiếu. Trong lúc đó web vẫn báo các chỉ số **đang** ngoài ngưỡng.
 
 ## 7. Khoảng sai số
 Mỗi ô dự báo kèm **±**: phân vị 80% của sai số tuyệt đối đo được khi kiểm chứng. Nghĩa là khoảng 80% lần dự báo trước đây có sai số không vượt quá mức này.
 
 ## 8. Đọc bảng trên web
-- **Bảng dự báo** (trang Tổng quan): cột “Bây giờ” là số đo mới nhất; các cột +1/+2/+3 giờ là dự báo kèm ±. Ô có “?” là chưa chắc (mô hình chưa tốt hơn cách giữ nguyên, cần thêm dữ liệu). Ô màu cam là ngoài ngưỡng.
+- **Bảng dự báo** (trang Tổng quan): cột “Bây giờ” là số đo mới nhất; các cột +1/+2/+3 giờ là dự báo (rê chuột vào ô để xem khoảng sai số 80%). Ô màu cam là ngoài ngưỡng.
 - **Bảng kiểm chứng** (tab Phân tích AI): MAE của mô hình cho từng chỉ số × mốc giờ, kèm % tốt hơn/kém hơn mốc “giữ nguyên”.
 - **Yếu tố ảnh hưởng:** độ quan trọng của đặc trưng (giảm độ hỗn tạp trung bình, MDI), gộp theo nhóm.
 

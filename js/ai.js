@@ -202,19 +202,16 @@ function renderRF() {
       const bad = (v) => v !== null && v !== undefined && outOf(v, th);
       const cell = (v, p) => {
         if (v === null || v === undefined) return `<div class="rf-val">—</div>`;
-        const unsure = p?.basis?.[k] === "unproven";
+        // Mỗi ô chỉ 1 con số; khoảng sai số để ở tooltip, độ tin cậy xem bảng kiểm chứng (tab Phân tích AI)
         const r = p?.range?.[k];
-        const tip = (r ? `80% khả năng nằm trong ${fmtWithUnit(k, r[0])} – ${fmtWithUnit(k, r[1])} (theo sai số kiểm chứng)` : "")
-          + (unsure ? ". Chưa chắc: khi kiểm chứng, mô hình chưa đoán tốt hơn cách 'giữ nguyên giá trị' — cần thêm dữ liệu" : "");
-        return `<div class="rf-val ${bad(v) ? "warn" : ""} ${unsure ? "persist" : ""}" title="${esc(tip)}">${fmtWithUnit(k, v)}${unsure ? "<i>?</i>" : ""}`
-          + (r ? `<small>±${fmtNum(k, (r[1] - r[0]) / 2)}</small>` : "") + `</div>`;
+        const tip = r ? `Khoảng ${fmtWithUnit(k, r[0])} – ${fmtWithUnit(k, r[1])} (theo sai số kiểm chứng)` : "";
+        return `<div class="rf-val ${bad(v) ? "warn" : ""}" title="${esc(tip)}">${fmtWithUnit(k, v)}</div>`;
       };
       return `<div class="rf-name"><span class="swatch" style="background:var(${SENSOR_BY_KEY[k].color})"></span>${name}</div>`
         + cell(th[k] !== undefined && th[k] !== null ? Number(th[k]) : rf.now?.[k]) + rf.predictions.map((p) => cell(p[k], p)).join("");  // "Bây giờ" = số đo mới nhất
     }).join("");
     body = `<div class="rf-table" style="--cols:${rf.predictions.length + 1}">${head}${rows}</div>
-      <p class="rf-legend"><b>±</b> sai số 80% đo được khi kiểm chứng · <b>?</b> chưa chắc: mô hình chưa đoán tốt hơn cách "giữ nguyên giá trị", cần thêm dữ liệu
-        · Dự báo lúc ${rf.ts ? fmtHour(rf.ts) : "—"}, mô hình học lúc ${rf.trained_at ? fmtHour(rf.trained_at) : "—"} (học lại mỗi 15 phút)</p>`;
+      <p class="rf-legend">Dự báo lúc ${rf.ts ? fmtHour(rf.ts) : "—"}, mô hình học lúc ${rf.trained_at ? fmtHour(rf.trained_at) : "—"} (học lại mỗi 15 phút) · Độ chính xác: xem bảng kiểm chứng ở tab Phân tích AI</p>`;
   }
   const advice = rf?.advice?.length && !backend.hardwareOffline
     ? `<ul class="rf-advice">${rf.advice.map((t) => `<li>${icon("lightbulb")}<span>${esc(t)}</span></li>`).join("")}</ul>` : "";
