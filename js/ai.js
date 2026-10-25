@@ -202,18 +202,19 @@ function renderRF() {
       const bad = (v) => v !== null && v !== undefined && outOf(v, th);
       const cell = (v, p) => {
         if (v === null || v === undefined) return `<div class="rf-val">—</div>`;
-        const persist = p?.basis?.[k] === "persist";
+        const unsure = p?.basis?.[k] === "unproven";
         const r = p?.range?.[k];
-        const tip = persist ? "Mô hình chưa dự báo tốt hơn cách 'giữ nguyên giá trị' cho chỉ số này nên hiển thị giá trị hiện tại"
-          : r ? `80% khả năng nằm trong ${fmtWithUnit(k, r[0])} – ${fmtWithUnit(k, r[1])} (theo sai số kiểm chứng)` : "";
-        return `<div class="rf-val ${bad(v) ? "warn" : ""} ${persist ? "persist" : ""}" title="${esc(tip)}">${fmtWithUnit(k, v)}${persist ? "<i>=</i>" : ""}`
-          + (r && !persist ? `<small>±${fmtNum(k, (r[1] - r[0]) / 2)}</small>` : "") + `</div>`;
+        const tip = (r ? `80% khả năng nằm trong ${fmtWithUnit(k, r[0])} – ${fmtWithUnit(k, r[1])} (theo sai số kiểm chứng)` : "")
+          + (unsure ? ". Chưa chắc: khi kiểm chứng, mô hình chưa đoán tốt hơn cách 'giữ nguyên giá trị' — cần thêm dữ liệu" : "");
+        return `<div class="rf-val ${bad(v) ? "warn" : ""} ${unsure ? "persist" : ""}" title="${esc(tip)}">${fmtWithUnit(k, v)}${unsure ? "<i>?</i>" : ""}`
+          + (r ? `<small>±${fmtNum(k, (r[1] - r[0]) / 2)}</small>` : "") + `</div>`;
       };
       return `<div class="rf-name"><span class="swatch" style="background:var(${SENSOR_BY_KEY[k].color})"></span>${name}</div>`
         + cell(th[k] !== undefined && th[k] !== null ? Number(th[k]) : rf.now?.[k]) + rf.predictions.map((p) => cell(p[k], p)).join("");  // "Bây giờ" = số đo mới nhất
     }).join("");
     body = `<div class="rf-table" style="--cols:${rf.predictions.length + 1}">${head}${rows}</div>
-      <p class="rf-legend"><b>±</b> sai số 80% đo được khi kiểm chứng · <b>=</b> mô hình chưa hơn cách "giữ nguyên giá trị" nên hiển thị giá trị hiện tại</p>`;
+      <p class="rf-legend"><b>±</b> sai số 80% đo được khi kiểm chứng · <b>?</b> chưa chắc: mô hình chưa đoán tốt hơn cách "giữ nguyên giá trị", cần thêm dữ liệu
+        · Dự báo lúc ${rf.ts ? fmtHour(rf.ts) : "—"}, mô hình học lúc ${rf.trained_at ? fmtHour(rf.trained_at) : "—"} (học lại mỗi 15 phút)</p>`;
   }
   const advice = rf?.advice?.length && !backend.hardwareOffline
     ? `<ul class="rf-advice">${rf.advice.map((t) => `<li>${icon("lightbulb")}<span>${esc(t)}</span></li>`).join("")}</ul>` : "";
@@ -259,7 +260,7 @@ function renderRFModel() {
           + `±${fmtNum(k, e.mae)}${UNIT[k]}<small>${e.skill > 0 ? "+" : ""}${e.skill}%</small></div>`;
       }).join("")).join("")}
     </div>
-    <p class="note">% = mô hình tốt hơn (+) hay kém hơn (−) cách dự báo "giữ nguyên giá trị hiện tại". Ô kém hơn thì web hiển thị giá trị giữ nguyên.</p>` : "";
+    <p class="note">% = mô hình tốt hơn (+) hay kém hơn (−) cách dự báo "giữ nguyên giá trị hiện tại". Ô chưa tốt hơn thì dự báo được đánh dấu "?" và không dùng để đưa gợi ý.</p>` : "";
   setHTML(el, `
     <div class="ml-state ${rf.validated ? "normal" : "learning"}">${icon(rf.validated ? "shield-check" : "loader")} ${rf.validated ? "Đã huấn luyện và kiểm chứng" : "Đang thu thập dữ liệu để kiểm chứng"}</div>
     <dl class="kv">

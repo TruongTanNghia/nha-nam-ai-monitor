@@ -12,7 +12,8 @@ Tóm tắt:
   (không lặp từng bước nên sai số không cộng dồn).
 - Kiểm chứng: walk-forward theo thời gian — mỗi lần thử trên 1 đoạn thời gian sau, chỉ học các mẫu mà kết quả
   đã biết TRƯỚC khi đoạn thử bắt đầu (không rò rỉ dữ liệu). So với mốc chuẩn "giữ nguyên" (persistence).
-  Chỉ số/mốc giờ nào mô hình KHÔNG tốt hơn mốc chuẩn thì hiển thị giá trị giữ nguyên và ghi rõ.
+  Chỉ số/mốc giờ nào mô hình CHƯA tốt hơn mốc chuẩn vẫn hiển thị dự báo nhưng đánh dấu "chưa chắc" (?)
+  và không dùng để đưa gợi ý.
 - Khoảng sai số: phân vị 80% của sai số tuyệt đối đo được khi kiểm chứng.
 """
 import logging
@@ -58,7 +59,8 @@ STEP = 900          # 1 trạng thái = trung bình 15 phút
 MIN_SAMPLES = 60    # ~7 giờ chạy liên tục (mỗi 15 phút cho tối đa 3 mẫu: +1, +2, +3 giờ)
 MIN_TRAIN, MIN_TEST = 24, 6
 FOLDS = 4
-RETRAIN_SEC = 3600
+RETRAIN_SEC = 900    # học lại mỗi 15 phút (mỗi 15 phút có thêm mẫu mới)
+RETRY_SEC = 120      # chưa đủ dữ liệu: đếm lại mỗi 2 phút
 RF_PARAMS = dict(n_estimators=200, max_depth=10, min_samples_leaf=3, random_state=42, n_jobs=1)
 METHOD = ("Random Forest (200 cây), dự báo trực tiếp mức thay đổi sau 1–3 giờ; "
           "kiểm chứng walk-forward theo thời gian, so với mốc chuẩn 'giữ nguyên giá trị'")
@@ -172,7 +174,8 @@ class RFAnalyzer:
                     continue
                 em, eb = err_m[sel, j], err_b[sel, j]
                 mae, mae_b = float(em.mean()), float(eb.mean())
-                skill = (1 - mae / mae_b) * 100 if mae_b > 1e-9 else 0.0
+                skill = (1 - mae / mae_b) * 100 if mae_b > 1e-9 else -100.0
+                skill = max(-100.0, min(100.0, skill))  # mốc chuẩn gần như không sai (số liệu đứng yên) -> -100%
                 e = {"mae": mae, "mae_base": mae_b, "skill": skill, "use_rf": skill > 0,
                      "q80": float(np.quantile(em, 0.8)), "q80_base": float(np.quantile(eb, 0.8))}
                 self.eval[(hz, k)] = e
@@ -198,7 +201,7 @@ class RFAnalyzer:
     def analyze(self, recent_rows, data, now=None):
         """recent_rows: số liệu gần đây (cũ -> mới); data: bản ghi Firebase mới nhất."""
         now = now or time.time()
-        if now - self.last_train >= RETRAIN_SEC or (self.model is None and now - self.last_train >= 600):
+        if now - self.last_train >= (RETRAIN_SEC if self.model is not None else RETRY_SEC):
             self.train(now)
         th = thresholds(data)
         live = {k: num(data.get(k)) for k in INDOOR}
@@ -221,12 +224,13 @@ class RFAnalyzer:
                         row[k] = None   # độ ẩm đất 0% = cảm biến lỗi -> không dự báo
                         continue
                     lo, hi = SENSORS[k]["phys"]
-                    value = base + float(dy[k]) if e["use_rf"] else base
-                    err = e["q80"] if e["use_rf"] else e["q80_base"]
+                    value = base + float(dy[k])
+                    err = e["q80"]
                     digits = 2 if k == "GT_PH" else 1
                     row[k] = round(min(max(value, lo), hi), digits)
                     row["range"][k] = [round(max(value - err, lo), digits), round(min(value + err, hi), digits)]
-                    row["basis"][k] = "rf" if e["use_rf"] else "persist"
+                    # "unproven": kiểm chứng chưa tốt hơn cách giữ nguyên -> vẫn hiện, ghi "chưa chắc", không dùng để gợi ý
+                    row["basis"][k] = "rf" if e["use_rf"] else "unproven"
                 predictions.append(row)
         self.result = {
             **self.info,
@@ -306,10 +310,10 @@ def report_lines(result):
     if not result.get("predictions"):
         return ([f"🌲 Random Forest: {result.get('note') or 'chưa có dự báo'}"]
                 + [f"👉 {tip}" for tip in result.get("advice") or []])
-    lines = ["🌲 Dự báo Random Forest (tham khảo — thiết bị vẫn bật/tắt theo ngưỡng; '=' là giữ nguyên giá trị):"]
+    lines = ["🌲 Dự báo Random Forest (tham khảo — thiết bị vẫn bật/tắt theo ngưỡng; '?' = chưa chắc, cần thêm dữ liệu):"]
     icons = {"t": "🌡", "h": "💧", "GT_AMDAT": "🌱", "GT_PH": "⚗️ pH", "GT_DOMAN": "🧂"}
     for p in result["predictions"]:
-        cells = [f"{icons[k]} {fmt(k, p.get(k))}{'=' if p.get('basis', {}).get(k) == 'persist' else ''}" for k in TARGETS]
+        cells = [f"{icons[k]} {fmt(k, p.get(k))}{'?' if p.get('basis', {}).get(k) == 'unproven' else ''}" for k in TARGETS]
         lines.append(f"• +{p['hours']} giờ: " + " | ".join(cells))
     lines += [f"👉 {tip}" for tip in result.get("advice") or []]
     best = [e for e in result.get("evaluation") or [] if e["hours"] == 1 and e["use_rf"]]

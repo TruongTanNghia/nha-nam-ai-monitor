@@ -39,7 +39,7 @@ Số đoạn bị loại được hiển thị trên web.
 - **Đầu ra (5):** *mức thay đổi* của 5 chỉ số sau h giờ so với hiện tại; h là biến đầu vào nên một mô hình dự báo cả 3 mốc. Dự báo = số đo hiện tại + mức thay đổi.
   - Học *mức thay đổi* thay vì giá trị tuyệt đối: khi dữ liệu ít, mô hình không bị kéo về giá trị trung bình lịch sử.
   - Dự báo **trực tiếp** từng mốc giờ, không lặp từng bước: sai số không cộng dồn.
-- Học lại mỗi giờ trên toàn bộ dữ liệu 30 ngày gần nhất.
+- Học lại mỗi 15 phút trên toàn bộ dữ liệu 30 ngày gần nhất; dự báo tính lại mỗi 2 phút.
 
 ## 6. Kiểm chứng
 - **Walk-forward theo thời gian (tối đa 4 lần):** chia khoảng thời gian có dữ liệu thành các đoạn liên tiếp. Mỗi lần thử trên một đoạn **sau**, mô hình chưa thấy đoạn đó. Không xáo trộn dữ liệu theo thời gian, vì xáo trộn sẽ cho kết quả đẹp giả.
@@ -48,14 +48,14 @@ Số đoạn bị loại được hiển thị trên web.
 - **Chỉ số đánh giá:**
   - MAE: sai số tuyệt đối trung bình, cùng đơn vị với chỉ số.
   - Skill (%) = (1 − MAE<sub>mô hình</sub> / MAE<sub>giữ nguyên</sub>) × 100. Dương nghĩa là mô hình tốt hơn.
-- **Quy tắc hiển thị:** với mỗi cặp (chỉ số, mốc giờ), nếu skill ≤ 0 thì web và Zalo hiển thị giá trị *giữ nguyên*, đánh dấu “=”. Hệ thống không đưa ra con số mà nó không chứng minh được là tốt hơn cách đơn giản nhất.
+- **Quy tắc hiển thị:** với mỗi cặp (chỉ số, mốc giờ), nếu skill ≤ 0 thì dự báo vẫn hiển thị nhưng đánh dấu **“?” (chưa chắc)** và **không dùng để đưa gợi ý**. Người xem luôn biết con số nào đã được chứng minh tốt hơn cách đơn giản nhất.
 - **Chưa kiểm chứng thì chưa dự báo:** cần tối thiểu 60 mẫu (khoảng 7–10 giờ máy chủ chạy liên tục) và ít nhất 2 lần kiểm chứng. Trước đó web ghi “Đang thu thập dữ liệu để kiểm chứng” kèm số giờ còn thiếu. Trong lúc đó web vẫn báo các chỉ số **đang** ngoài ngưỡng.
 
 ## 7. Khoảng sai số
 Mỗi ô dự báo kèm **±**: phân vị 80% của sai số tuyệt đối đo được khi kiểm chứng. Nghĩa là khoảng 80% lần dự báo trước đây có sai số không vượt quá mức này.
 
 ## 8. Đọc bảng trên web
-- **Bảng dự báo** (trang Tổng quan): cột “Bây giờ” là số đo mới nhất; các cột +1/+2/+3 giờ là dự báo kèm ±. Ô có “=” là giữ nguyên. Ô màu cam là ngoài ngưỡng.
+- **Bảng dự báo** (trang Tổng quan): cột “Bây giờ” là số đo mới nhất; các cột +1/+2/+3 giờ là dự báo kèm ±. Ô có “?” là chưa chắc (mô hình chưa tốt hơn cách giữ nguyên, cần thêm dữ liệu). Ô màu cam là ngoài ngưỡng.
 - **Bảng kiểm chứng** (tab Phân tích AI): MAE của mô hình cho từng chỉ số × mốc giờ, kèm % tốt hơn/kém hơn mốc “giữ nguyên”.
 - **Yếu tố ảnh hưởng:** độ quan trọng của đặc trưng (giảm độ hỗn tạp trung bình, MDI), gộp theo nhóm.
 
