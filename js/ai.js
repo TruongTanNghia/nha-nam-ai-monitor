@@ -258,13 +258,13 @@ function renderRFModel() {
           + `±${fmtNum(k, e.mae)}${UNIT[k]}<small>${e.skill > 0 ? "+" : ""}${e.skill}%</small></div>`;
       }).join("")).join("")}
     </div>
-    <p class="note">% = mô hình tốt hơn (+) hay kém hơn (−) cách dự báo "giữ nguyên giá trị hiện tại". Ô chưa tốt hơn thì dự báo được đánh dấu "?" và không dùng để đưa gợi ý.</p>` : "";
+    <p class="note">% = mô hình tốt hơn (+) hay kém hơn (−) cách dự báo "giữ nguyên giá trị hiện tại". Ô chưa tốt hơn (màu xám) thì dự báo vẫn hiển thị nhưng không dùng để đưa gợi ý.</p>` : "";
   setHTML(el, `
     <div class="ml-state ${rf.validated ? "normal" : "learning"}">${icon(rf.validated ? "shield-check" : "loader")} ${rf.validated ? "Đã huấn luyện và kiểm chứng" : "Đang thu thập dữ liệu để kiểm chứng"}</div>
     <dl class="kv">
       <div><dt>Phương pháp</dt><dd>${esc(rf.method || "Random Forest")}</dd></div>
-      <div><dt>Dữ liệu</dt><dd>${rf.samples ?? 0} mẫu giờ${rf.skipped ? ` (đã loại ${rf.skipped} giờ cảm biến lỗi)` : ""} · ${period}</dd></div>
-      ${rf.validated ? `<div><dt>Kiểm chứng</dt><dd>Walk-forward ${rf.folds} lần, ${rf.test_samples} giờ thử</dd></div>` : ""}
+      <div><dt>Dữ liệu</dt><dd>${rf.samples ?? 0} mẫu (15 phút/mẫu)${rf.skipped ? `, đã loại ${rf.skipped} đoạn cảm biến lỗi` : ""} · ${period}</dd></div>
+      ${rf.validated ? `<div><dt>Kiểm chứng</dt><dd>Walk-forward ${rf.folds} lần, ${rf.test_samples} mẫu thử chưa thấy</dd></div>` : ""}
       <div><dt>Lần huấn luyện</dt><dd>${rf.trained_at ? timeAgo(rf.trained_at * 1000) : "—"}</dd></div>
     </dl>
     ${evalTable}
