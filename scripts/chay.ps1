@@ -77,6 +77,15 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
 }
 $port = Get-EnvValue "PORT"; if (-not $port) { $port = "5000" }
 Get-CimInstance Win32_Process | Where-Object { Test-NhaNamProcess $_ } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; Ok "Da tat ban cu: $($_.Name)" }
+# Tu lay code moi nhat tu GitHub (khoi phai nho git pull); loi thi van chay ban dang co
+if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $Root ".git"))) {
+    $before = git -C $Root rev-parse --short HEAD 2>$null
+    $out = git -C $Root pull --ff-only 2>&1
+    $after = git -C $Root rev-parse --short HEAD 2>$null
+    if ($before -ne $after) { Ok "Da cap nhat code moi: $before -> $after" }
+    elseif ($out -match "Already up to date|Da cap nhat|up-to-date") { Ok "Code da la ban moi nhat ($after)" }
+    else { Warn "Khong tu cap nhat duoc code (mat mang hoac co file sua tay) - van chay ban hien co. Chi tiet: $($out | Select-Object -Last 1)" }
+}
 
 Step "2/5 Python"
 $py = Find-Python
