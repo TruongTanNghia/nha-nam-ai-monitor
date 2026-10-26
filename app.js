@@ -561,6 +561,9 @@ async function seedLiveFromServer() {
 async function syncBackend() {
   await refreshSnapshot();
   $("#connServer").classList.toggle("on", backend.online);
+  // Mã phiên bản code máy chủ đang chạy -> biết máy đã lấy code mới chưa
+  const ver = backend.online ? backend.health?.version : null;
+  $("#connServer span:last-child").textContent = ver ? `Máy chủ AI · ${ver}` : "Máy chủ AI";
   renderAnalysis();
   renderZalo();
   if (state.data) {

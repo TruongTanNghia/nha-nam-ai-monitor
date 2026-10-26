@@ -5,6 +5,7 @@ Chạy:  python server/app.py   rồi mở http://localhost:5000
 import hmac
 import logging
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -37,6 +38,43 @@ logging.basicConfig(
 )
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
+log = logging.getLogger("app")
+
+
+def _code_version():
+    """Mã commit git đang chạy -> web hiện ra để biết máy đã lấy code mới chưa."""
+    try:
+        out = subprocess.run(["git", "-C", str(config.PROJECT_DIR), "log", "-1", "--format=%h %cd", "--date=format:%d/%m %H:%M"],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() or "?"
+    except (OSError, subprocess.SubprocessError):
+        return "?"
+
+
+def _free_port(port):
+    """Tắt máy chủ Nhà Nấm cũ còn giữ cổng (vd chạy ngầm, hoặc cửa sổ cũ quên đóng). Trên Windows 2 tiến trình
+    có thể cùng nghe 1 cổng, web sẽ vẫn nói chuyện với bản CŨ dù đã chạy bản mới."""
+    if os.name != "nt":
+        return
+    try:
+        lines = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return
+    pids = {int(c[-1]) for c in (ln.split() for ln in lines)
+            if len(c) >= 5 and c[1].endswith(f":{port}") and c[3] == "LISTENING" and c[-1].isdigit()}
+    for pid in pids - {os.getpid()}:
+        cmd = subprocess.run(["powershell", "-NoProfile", "-Command",
+                              f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                             capture_output=True, text=True, timeout=15).stdout.strip()
+        if "app.py" in cmd:
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=10)
+            log.warning("Đã tắt máy chủ Nhà Nấm CŨ đang giữ cổng %s (PID %s)", port, pid)
+            print(f"⚠️  Đã tắt máy chủ Nhà Nấm cũ đang giữ cổng {port} (PID {pid})")
+        else:
+            print(f"⚠️  Cổng {port} đang bị chương trình khác dùng (PID {pid}): {cmd[:120]}")
+
+
+VERSION = _code_version()
 app = Flask(__name__, static_folder=None)
 engine = Engine()
 tunnel = Tunnel(engine)
@@ -95,6 +133,8 @@ def preflight(_):
 def health():
     return jsonify({
         "ok": True,
+        "version": VERSION,
+        "weather_place": (engine.weather.location or {}).get("name") or config.WEATHER_NAME,
         "uptime_sec": round(time.time() - engine.started_at),
         "last_ok_ts": engine.last_ok_ts,
         "firebase_ok": engine.fail_count == 0 and engine.last_ok_ts is not None,
@@ -179,7 +219,8 @@ def mute():
 
 
 if __name__ == "__main__":
+    _free_port(config.PORT)
     engine.start()
     tunnel.start()
-    print(f"\n🍄 Máy chủ AI Nhà Nấm: http://localhost:{config.PORT}\n")
+    print(f"\n🍄 Máy chủ AI Nhà Nấm: http://localhost:{config.PORT}  (bản code {VERSION}, thời tiết: {config.WEATHER_NAME})\n")
     app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)
