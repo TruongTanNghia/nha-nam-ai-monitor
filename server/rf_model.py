@@ -5,7 +5,7 @@ Thiết bị vẫn bật/tắt theo ngưỡng (firmware ESP32). Phương pháp c
 Tóm tắt:
 - Dữ liệu: cứ 15 phút lấy 1 "trạng thái" = trung bình 15 phút của nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng,
   pH, độ mặn, tỉ lệ bật thiết bị; ghép thời tiết Open-Meteo lúc đó và lúc cần dự báo.
-- Mẫu = (trạng thái lúc τ, mốc h ∈ {1,2,3} giờ) -> mức thay đổi của 6 chỉ số tới lúc τ + h.
+- Mẫu = (trạng thái lúc τ + xu hướng 1 giờ qua, mốc h ∈ {1,2,3} giờ) -> mức thay đổi của 6 chỉ số tới lúc τ + h.
 - Làm sạch: bỏ trạng thái có cảm biến ngoài khoảng vật lý, độ ẩm đất đúng 0% (cảm biến chưa cắm/đứt dây),
   và mẫu có thay đổi vượt mức vật lý hợp lý (nhảy số khi cắm lại cảm biến).
 - Mô hình: MỘT RandomForestRegressor, mốc giờ h là một biến đầu vào, dự báo TRỰC TIẾP từng mốc
@@ -35,6 +35,7 @@ INDOOR = ["t", "h", "GT_AMDAT", "ANHSANG", "GT_PH", "GT_DOMAN"]
 DEVICES = ["QUAT", "SUONG", "BOM", "DEN", "MO"]
 OUT = ["temp", "hum", "cloud", "rad", "precip", "wind"]   # thời tiết lúc hiện tại
 OUT_FUT = ["temp", "hum", "rad", "precip"]                 # thời tiết lúc cần dự báo (dự báo Open-Meteo)
+TREND = ["t", "h", "GT_AMDAT", "ANHSANG"]                  # xu hướng: thay đổi trong 1 giờ qua (đang nóng lên/nguội đi...)
 TARGETS = ["t", "h", "GT_AMDAT", "ANHSANG", "GT_PH", "GT_DOMAN"]
 HORIZONS = (1, 2, 3)
 OUTPUTS = [(hz, k) for hz in HORIZONS for k in TARGETS]
@@ -42,7 +43,7 @@ OUTPUTS = [(hz, k) for hz in HORIZONS for k in TARGETS]
 # ánh sáng đổi rất nhanh (mây, bật/tắt đèn, ngày/đêm) -> không lọc theo mức thay đổi
 MAX_JUMP = {"t": 6.0, "h": 25.0, "GT_AMDAT": 25.0, "ANHSANG": 70000.0, "GT_PH": 1.0, "GT_DOMAN": 300.0}
 
-FEATURES = (INDOOR + DEVICES + [f"o_{k}" for k in OUT] + [f"f_{k}" for k in OUT_FUT]
+FEATURES = (INDOOR + [f"d_{k}" for k in TREND] + DEVICES + [f"o_{k}" for k in OUT] + [f"f_{k}" for k in OUT_FUT]
             + ["hour_sin", "hour_cos", "horizon"])
 GROUPS = {  # gộp đặc trưng thành nhóm dễ hiểu khi giải thích "yếu tố ảnh hưởng"
     "Nhiệt độ ngoài trời": ["o_temp", "f_temp"],
@@ -55,6 +56,7 @@ GROUPS = {  # gộp đặc trưng thành nhóm dễ hiểu khi giải thích "y�
     "Dự báo xa hay gần (1–3 giờ)": ["horizon"],
     "Thiết bị đang chạy": DEVICES,
     "Chỉ số trong nhà hiện tại": INDOOR,
+    "Xu hướng 1 giờ qua": [f"d_{k}" for k in TREND],
 }
 STEP = 900          # 1 trạng thái = trung bình 15 phút
 MIN_SAMPLES = 60    # ~7 giờ chạy liên tục (mỗi 15 phút cho tối đa 3 mẫu: +1, +2, +3 giờ)
@@ -67,9 +69,12 @@ METHOD = ("Random Forest (200 cây), dự báo trực tiếp mức thay đổi s
           "kiểm chứng walk-forward theo thời gian, so với mốc chuẩn 'giữ nguyên giá trị'")
 
 
-def _features(state, devices, w_now, w_fut, t_mid, hz):
+def _features(state, prev, devices, w_now, w_fut, t_mid, hz):
+    """prev: trạng thái 1 giờ trước (để tính xu hướng)."""
     hour = time.localtime(t_mid).tm_hour + time.localtime(t_mid).tm_min / 60
-    row = [state.get(k) for k in INDOOR] + [devices.get(k, 0) or 0 for k in DEVICES]
+    row = [state.get(k) for k in INDOOR]
+    row += [None if state.get(k) is None or prev.get(k) is None else state[k] - prev[k] for k in TREND]
+    row += [devices.get(k, 0) or 0 for k in DEVICES]
     row += [(w_now or {}).get(k) for k in OUT] + [(w_fut or {}).get(k) for k in OUT_FUT]
     row += [math.sin(2 * math.pi * hour / 24), math.cos(2 * math.pi * hour / 24), hz]
     return None if any(v is None for v in row) else row
@@ -105,6 +110,9 @@ class RFAnalyzer:
             if b in bad:
                 continue
             r, t_mid = buckets[b], b + STEP / 2
+            prev = buckets.get(b - 3600)
+            if prev is None or b - 3600 in bad:
+                continue  # chưa có số liệu 1 giờ trước để tính xu hướng
             for hz in HORIZONS:
                 f = buckets.get(b + hz * 3600)
                 if f is None:
@@ -117,7 +125,7 @@ class RFAnalyzer:
                     skipped += 1  # nhảy số bất thường (cắm lại cảm biến...) -> không phải diễn biến thật
                     continue
                 # khi học: thời tiết lúc τ + h là số đo thật (thay cho dự báo)
-                x = _features(r, r, w_at(t_mid), w_at(t_mid + hz * 3600), t_mid, hz)
+                x = _features(r, prev, r, w_at(t_mid), w_at(t_mid + hz * 3600), t_mid, hz)
                 if x is not None:
                     X.append(x)
                     Y.append(dy)
@@ -210,14 +218,16 @@ class RFAnalyzer:
         live = {k: num(data.get(k)) for k in INDOOR}
         rows = [r for r in recent_rows if r["ts"] >= now - STEP] or recent_rows[-1:]
         state = {k: _mean(rows, k) for k in INDOOR}       # đầu vào: trung bình 15 phút (giống lúc học)
+        old = [r for r in recent_rows if now - 3600 - STEP <= r["ts"] < now - 3600]
+        prev = {k: _mean(old, k) for k in INDOOR}         # 15 phút của 1 giờ trước -> xu hướng
         devices = {k: _mean(rows, k) or 0 for k in DEVICES}
         t_mid = now - STEP / 2
         predictions = []
         if self.model is not None:
             for hz in HORIZONS:
-                x = _features(state, devices, self.weather.at(t_mid), self.weather.at(t_mid + hz * 3600), t_mid, hz)
+                x = _features(state, prev, devices, self.weather.at(t_mid), self.weather.at(t_mid + hz * 3600), t_mid, hz)
                 if x is None:
-                    break
+                    break  # máy chủ chưa chạy đủ 1 giờ (chưa có xu hướng) hoặc thiếu thời tiết
                 dy = dict(zip(TARGETS, self.model.predict(np.array([x], dtype=float))[0]))
                 row = {"hours": hz, "range": {}, "basis": {}}
                 for k in TARGETS:

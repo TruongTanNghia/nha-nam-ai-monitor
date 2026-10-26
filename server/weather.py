@@ -1,9 +1,8 @@
 """Thời tiết ngoài trời (Open-Meteo, miễn phí, không cần key).
 
-Vị trí: WEATHER_LAT/WEATHER_LON trong server/.env, để trống thì tự đoán theo IP mạng (ip-api.com).
+Vị trí: WEATHER_LAT/WEATHER_LON trong server/.env, mặc định TP. Vĩnh Long (config.py).
 Lấy thời tiết hiện tại + theo giờ 31 ngày qua và 2 ngày tới, lưu vào SQLite để mô hình Random Forest học.
 """
-import json
 import logging
 import time
 
@@ -16,7 +15,6 @@ log = logging.getLogger("weather")
 API = "https://api.open-meteo.com/v1/forecast"
 FIELDS = "temperature_2m,relative_humidity_2m,cloud_cover,shortwave_radiation,precipitation,wind_speed_10m"
 KEYS = ("temp", "hum", "cloud", "rad", "precip", "wind")
-LOCATION_FILE = config.SERVER_DIR / "data" / "location.json"
 
 
 def _hourly_rows(block):
@@ -40,21 +38,9 @@ class Weather:
         self.updated = None
         self.error = None
 
-    def _locate(self):
-        if config.WEATHER_LAT is not None and config.WEATHER_LON is not None:
-            return {"lat": config.WEATHER_LAT, "lon": config.WEATHER_LON, "name": config.WEATHER_NAME or "Nhà nấm"}
-        try:
-            return json.loads(LOCATION_FILE.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            pass
-        res = requests.get("http://ip-api.com/json/?fields=status,city,regionName,lat,lon", timeout=10).json()
-        if res.get("status") != "success":
-            raise RuntimeError("Không xác định được vị trí — đặt WEATHER_LAT, WEATHER_LON trong server/.env")
-        loc = {"lat": res["lat"], "lon": res["lon"], "name": res.get("city") or res.get("regionName") or "?"}
-        LOCATION_FILE.parent.mkdir(parents=True, exist_ok=True)
-        LOCATION_FILE.write_text(json.dumps(loc, ensure_ascii=False), encoding="utf-8")
-        log.info("Vị trí theo IP mạng: %s (%.3f, %.3f)", loc["name"], loc["lat"], loc["lon"])
-        return loc
+    @staticmethod
+    def _locate():
+        return {"lat": config.WEATHER_LAT, "lon": config.WEATHER_LON, "name": config.WEATHER_NAME or "Nhà nấm"}
 
     def refresh(self):
         """Gọi định kỳ (15 phút). Lỗi mạng thì giữ dữ liệu cũ."""

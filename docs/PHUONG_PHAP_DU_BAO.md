@@ -15,7 +15,7 @@ Dự báo sau **1, 2 và 3 giờ** cho 6 chỉ số trong nhà nấm: nhiệt đ
 
 **Trạng thái:** cứ 15 phút lấy trung bình các lần đo trong 15 phút đó (lọc nhiễu của cảm biến, vẫn bám kịp khi chỉ số đổi nhanh).
 
-**Mẫu dữ liệu:** một mẫu = (trạng thái lúc τ, mốc dự báo h ∈ {1, 2, 3} giờ) → mức thay đổi của 6 chỉ số từ τ tới τ + h. Mỗi trạng thái cho tối đa 3 mẫu; chỉ cần có số liệu lúc τ + h là dùng được, không bắt buộc đủ cả 3 giờ liên tục.
+**Mẫu dữ liệu:** một mẫu = (trạng thái lúc τ, xu hướng 1 giờ qua, mốc dự báo h ∈ {1, 2, 3} giờ) → mức thay đổi của 6 chỉ số từ τ tới τ + h. Mỗi trạng thái cho tối đa 3 mẫu; chỉ cần có số liệu lúc τ + h là dùng được, không bắt buộc đủ cả 3 giờ liên tục.
 
 ## 3. Làm sạch dữ liệu (quy tắc cố định, không chỉnh tay)
 Một trạng thái 15 phút bị **loại** nếu:
@@ -26,8 +26,9 @@ Một mẫu bị loại nếu thay đổi vượt mức vật lý hợp lý (m�
 
 Số đoạn bị loại được hiển thị trên web.
 
-## 4. Đặc trưng đầu vào (24 biến)
+## 4. Đặc trưng đầu vào (28 biến)
 - Trạng thái trong nhà lúc τ: 6 chỉ số.
+- Xu hướng: mức thay đổi trong 1 giờ qua của nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng (biến trễ – lag – chuẩn trong dự báo chuỗi thời gian; cho mô hình biết đang nóng lên hay nguội đi). Cần máy chủ chạy ít nhất 1 giờ mới dự báo.
 - Tỉ lệ thời gian bật của 5 thiết bị trong 15 phút đó.
 - Thời tiết lúc τ: 6 biến.
 - Thời tiết lúc τ + h (nhiệt độ, độ ẩm, bức xạ, mưa): 4 biến. Khi học dùng số đo thật; khi dự báo dùng dự báo của Open-Meteo.
@@ -63,7 +64,7 @@ Mỗi ô dự báo kèm **±**: phân vị 80% của sai số tuyệt đối đo
 - Dữ liệu còn ít (vài ngày đến vài tuần). Kết quả kiểm chứng sẽ ổn định hơn khi thu thập lâu hơn.
 - Thiết bị bật/tắt theo ngưỡng làm thay đổi chính các chỉ số đang được dự báo (vòng phản hồi). Mô hình học quan hệ này từ biến “thiết bị đang chạy” nhưng không mô phỏng vật lý.
 - Khi học dùng thời tiết thực đo, khi dự báo dùng thời tiết dự báo, nên sai số thực tế có thể lớn hơn một chút so với kiểm chứng.
-- Vị trí thời tiết mặc định đoán theo IP mạng. Nên đặt `WEATHER_LAT`/`WEATHER_LON` đúng tọa độ nhà nấm.
+- Thời tiết lấy theo tọa độ trung tâm TP. Vĩnh Long; có thể đặt `WEATHER_LAT`/`WEATHER_LON` đúng tọa độ nhà nấm.
 - pH và độ mặn thường thay đổi chậm và ngẫu nhiên, nên mốc “giữ nguyên” thường khó bị vượt. Đây là kết quả đúng, không phải lỗi.
 
 ## Tài liệu tham khảo

@@ -115,9 +115,11 @@ if 0 < PERIODIC_REPORT_SEC < 600:  # 15 giây/lần làm bot hết hạn mức t
 HISTORY_RETENTION_DAYS = _int("HISTORY_RETENTION_DAYS", 30)
 
 # ---------- Thời tiết ngoài trời (Open-Meteo) cho phân tích Random Forest ----------
-# Để trống = tự đoán vị trí theo IP mạng của máy chạy máy chủ
+# Mặc định: TP. Vĩnh Long (nơi đặt nhà nấm). Đặt WEATHER_LAT/WEATHER_LON trong .env để dùng tọa độ khác
 WEATHER_LAT = _opt_float("WEATHER_LAT")
 WEATHER_LON = _opt_float("WEATHER_LON")
 WEATHER_NAME = _str("WEATHER_NAME")
+if WEATHER_LAT is None or WEATHER_LON is None:
+    WEATHER_LAT, WEATHER_LON, WEATHER_NAME = 10.2537, 105.9722, WEATHER_NAME or "Vĩnh Long"
 
 DB_PATH = SERVER_DIR / "data" / "greenhouse.db"
