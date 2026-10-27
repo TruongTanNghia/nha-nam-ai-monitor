@@ -273,5 +273,6 @@ if __name__ == "__main__":
     tunnel.start()
     print(f"\n🍄 Máy chủ AI Nhà Nấm: http://localhost:{config.PORT}  (bản code {VERSION}, thời tiết: {config.WEATHER_NAME})")
     print("   Google Sheet: " + (f"link Apps Script trong {config.GOOGLE_SCRIPT_FROM}" if config.GOOGLE_SCRIPT_URL
-                                 else "Sheet tự ghi 24/7 (CAI_DAT trong Apps Script); máy chủ chưa có link /exec - không bắt buộc") + "\n")
+                                 else "Sheet tự ghi 24/7 (CAI_DAT trong Apps Script); máy chủ chưa có link /exec - không bắt buộc"))
+    print(f"   File CSV (dữ liệu gốc + dự báo & thực tế, 5 phút/lần): {config.CSV_DIR}\n")
     app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)

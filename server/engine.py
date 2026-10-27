@@ -17,6 +17,7 @@ from controller import AutoController, explain_auto
 from firebase_client import Firebase
 from forecast_log import ForecastLog
 from rf_model import RFAnalyzer, report_lines
+from csv_files import CsvFiles
 from sheet_sync import SheetSync
 from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, RESET_REASONS, SENSOR_KEYS, SENSORS, fmt, num, thresholds
 from storage import Storage
@@ -74,6 +75,7 @@ class Engine:
         self.rf = RFAnalyzer(self.store, self.weather)
         self.sheet = SheetSync(self.store)
         self.forecasts = ForecastLog(self.store)
+        self.csv = CsvFiles(self.store, self.forecasts)
         self.zalo = ZaloBot()
         self.outbox = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outbox")
         self.lock = threading.RLock()
@@ -153,8 +155,10 @@ class Engine:
             try:
                 if now - self.last_sheet >= (SHEET_EVERY if self.sheet.status["synced_at"] else 300):
                     self.last_sheet = now
-                    if self.sheet.run() and self.rf.model is None:
-                        self.rf.last_train = 0  # có thêm dữ liệu cũ -> thử học lại ngay
+                    if self.sheet.run():
+                        self.csv.mark_full()  # có thêm dữ liệu cũ -> ghi lại cả các tháng trước
+                        if self.rf.model is None:
+                            self.rf.last_train = 0  # có thêm dữ liệu cũ -> thử học lại ngay
                 if now - self.last_weather >= (WEATHER_EVERY if self.weather.updated else 120):
                     self.last_weather = now
                     if self.weather.refresh() and self.rf.result is None:
@@ -168,6 +172,7 @@ class Engine:
                     self.last_sheet_push = now
                     self.forecasts.push_sheet(now)
                 self.forecasts.refresh_summary(now)
+                self.csv.update(now)
             except Exception:
                 log.exception("Lỗi phân tích thời tiết / Random Forest")
             time.sleep(20)
@@ -686,6 +691,7 @@ class Engine:
                 "weather": self.weather.status(),
                 "sheet": self.sheet.status,
                 "forecast_check": self.forecasts.status(),
+                "csv": self.csv.status,
                 "esp_online": self.esp_online,
                 "hardware": {
                     "last_change_ts": self.hw_last_change,

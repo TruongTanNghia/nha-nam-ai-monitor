@@ -19,6 +19,17 @@ def _fmt(ts, pattern):
     return dt.datetime.fromtimestamp(ts).strftime(pattern)
 
 
+RAW_HEADERS = (["NGÀY", "GIỜ"] + [label(k) for k in RAW_SENSORS] + [DEVICES[d] for d in RAW_DEVICES]
+               + ["Chế độ AUTO", "Số lần đo"])
+
+
+def raw_row(r):
+    """1 phút dữ liệu gốc (từ store.minute_readings) -> 1 dòng theo RAW_HEADERS (dùng cho Excel và CSV)."""
+    return ([_fmt(r["ts"], "%d/%m/%Y"), _fmt(r["ts"], "%H:%M")]
+            + [None if r[k] is None else round(r[k], 2 if k == "GT_PH" else 1) for k in RAW_SENSORS]
+            + [None if r[d] is None else round(r[d], 2) for d in RAW_DEVICES + ["MODE"]] + [r["n"]])
+
+
 def _sheet(wb, title, headers, rows, widths=None):
     from openpyxl.cell import WriteOnlyCell
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -73,14 +84,7 @@ def build(engine, days=30):
     _sheet(wb, "Giới thiệu", ["Dữ liệu Nhà Nấm AI", "Nội dung"], intro, [20, 110])
 
     # 2) Dữ liệu gốc (mỗi phút)
-    headers = (["NGÀY", "GIỜ"] + [label(k) for k in RAW_SENSORS] + [DEVICES[d] for d in RAW_DEVICES]
-               + ["Chế độ AUTO", "Số lần đo"])
-    rows = []
-    for r in raw:
-        rows.append([_fmt(r["ts"], "%d/%m/%Y"), _fmt(r["ts"], "%H:%M")]
-                    + [None if r[k] is None else round(r[k], 2 if k == "GT_PH" else 1) for k in RAW_SENSORS]
-                    + [None if r[d] is None else round(r[d], 2) for d in RAW_DEVICES + ["MODE"]] + [r["n"]])
-    _sheet(wb, "Dữ liệu gốc", headers, rows, [12, 8] + [14] * (len(headers) - 2))
+    _sheet(wb, "Dữ liệu gốc", RAW_HEADERS, [raw_row(r) for r in raw], [12, 8] + [14] * (len(RAW_HEADERS) - 2))
 
     # 3) Dự báo & thực tế (giống tab DỰ BÁO trên Google Sheet)
     _sheet(wb, "Dự báo & thực tế", FORECAST_HEADERS, [ForecastLog.row(g) for g in groups],

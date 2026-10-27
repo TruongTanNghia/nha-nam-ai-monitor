@@ -32,6 +32,19 @@ Máy chủ ghi lại **mọi lần Random Forest dự báo** (15 phút/lần, ch
 
 Mỗi dòng của tab DỰ BÁO gồm: lúc dự báo, dự báo cho lúc nào, sau mấy giờ. Với mỗi chỉ số (nhiệt độ, độ ẩm không khí, độ ẩm đất, ánh sáng, pH, độ mặn) có 3 cột: **giá trị lúc dự báo**, **RF dự báo**, **thực tế**.
 
+## File CSV tự lưu trên máy (không cần làm gì)
+
+Máy chủ chạy là tự ghi vào thư mục **`DU_LIEU_CSV`** (nằm trong thư mục dự án, cạnh `CHAY_NHA_NAM.bat`), 5 phút/lần:
+
+| File | Nội dung |
+|---|---|
+| `du_lieu_goc_2026-10.csv` | mỗi tháng 1 file, mỗi phút 1 dòng: 6 cảm biến + thiết bị + chế độ AUTO + số lần đo (giống trang “Dữ liệu gốc” của file Excel) |
+| `du_bao_va_thuc_te.csv` | mọi lần Random Forest dự báo + số đo thật lúc tới giờ (giống tab DỰ BÁO) |
+
+Mở thẳng bằng Excel hoặc kéo vào Google Drive. Nếu đang mở file trong Excel thì máy chủ chờ, đóng Excel là tự ghi tiếp. Muốn lưu chỗ khác thì đặt `CSV_DIR=D:\...` trong `server/.env`.
+
+> Excel hiện mọi thứ dồn vào 1 cột (máy để định dạng số kiểu Việt Nam): vào **Dữ liệu → Từ Văn bản/CSV** → chọn file → Dấu phân cách: **Dấu phẩy**.
+
 ## Tải file Excel (nộp BTC)
 
 Web → tab **Phân tích AI** → thẻ **Mô hình Random Forest** → nút **7 / 30 / 365 ngày**. Hoặc mở `http://localhost:5000/api/export.xlsx?days=30`. File gồm các trang:

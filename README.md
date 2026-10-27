@@ -74,7 +74,7 @@ pH và độ mặn **không trung bình hóa** với nhiệt độ hay ánh sán
 - **Thiết bị**: bơm chạy 8 phút mà đất không ẩm lên, quạt 15 phút không hạ nhiệt, phun sương không tăng ẩm, đèn bật không sáng hơn, màn che nhận cả MỞ & ĐÓNG, bật/tắt liên tục (≥ 6 lần/10 phút), bơm/phun sương chạy quá lâu.
 
 ### Dữ liệu lưu 24/7 (server/sheet_sync.py, server/forecast_log.py, google_sheet/Code.gs)
-Google Sheet được ghi 1 phút/lần kể cả khi máy tính tắt: Apps Script tự đọc Firebase (chạy hàm `CAI_DAT` 1 lần, không phải nạp lại ESP32). Nếu có link `/exec`, máy chủ AI tự lấy Sheet về (khởi động + 30 phút/lần) để lấp các đoạn nó không chạy, nên biểu đồ và mô hình có đủ ngày đêm. Mỗi lần dự báo được lưu lại; tới giờ thì so với số đo thật, ghi vào tab DỰ BÁO của Sheet. Web có nút tải Excel gồm dữ liệu gốc, dự báo & thực tế và tổng hợp sai số. Cài đặt: [docs/GOOGLE_SHEET.md](docs/GOOGLE_SHEET.md).
+Google Sheet được ghi 1 phút/lần kể cả khi máy tính tắt: Apps Script tự đọc Firebase (chạy hàm `CAI_DAT` 1 lần, không phải nạp lại ESP32). Nếu có link `/exec`, máy chủ AI tự lấy Sheet về (khởi động + 30 phút/lần) để lấp các đoạn nó không chạy, nên biểu đồ và mô hình có đủ ngày đêm. Mỗi lần dự báo được lưu lại; tới giờ thì so với số đo thật, ghi vào tab DỰ BÁO của Sheet. Web có nút tải Excel gồm dữ liệu gốc, dự báo & thực tế và tổng hợp sai số; máy chủ cũng tự lưu file CSV vào thư mục `DU_LIEU_CSV/` 5 phút/lần. Cài đặt: [docs/GOOGLE_SHEET.md](docs/GOOGLE_SHEET.md).
 
 ### Random Forest + thời tiết ngoài trời (server/rf_model.py, server/weather.py) — CHỈ THAM KHẢO
 Phương pháp, kiểm chứng và hạn chế: [docs/PHUONG_PHAP_DU_BAO.md](docs/PHUONG_PHAP_DU_BAO.md).

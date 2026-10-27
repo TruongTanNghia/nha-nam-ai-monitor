@@ -152,3 +152,5 @@ if not GOOGLE_SCRIPT_URL:
     GOOGLE_SCRIPT_URL, GOOGLE_SCRIPT_FROM = _script_url_from_secrets()
 
 DB_PATH = SERVER_DIR / "data" / "greenhouse.db"
+# File CSV dữ liệu gốc + dự báo & thực tế tự lưu trên máy (5 phút/lần)
+CSV_DIR = _str("CSV_DIR") or str(PROJECT_DIR / "DU_LIEU_CSV")

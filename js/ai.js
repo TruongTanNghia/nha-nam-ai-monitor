@@ -263,6 +263,12 @@ function errorGrid(rows, UNIT, good) {
 }
 
 /** Tab DỰ BÁO trên Google Sheet (máy chủ ghi bảng dự báo & thực tế) */
+function csvText(s) {
+  if (!s) return "File CSV trên máy: đang chờ máy chủ";
+  return `File CSV tự lưu trên máy chạy máy chủ (5 phút/lần): ${s.dir} — ${s.files} file`
+    + (s.updated ? `, cập nhật ${timeAgo(s.updated * 1000)}` : "") + (s.error ? ` — ${s.error}` : "");
+}
+
 function forecastSheetText(s) {
   if (!s?.enabled) return "Không bắt buộc (Sheet vẫn tự ghi 24/7): muốn máy chủ lấy dữ liệu Sheet về thì dán link /exec vào server/.env (xem docs/GOOGLE_SHEET.md)";
   if (s.error) return `Lỗi: ${s.error}`;
@@ -289,7 +295,8 @@ function renderRFModel() {
     ${fc?.rows?.length ? errorGrid(fc.rows, UNIT, (e) => e.skill > 0) : ""}
     <p class="note">${fc ? `${fc.checked} lần dự báo đã có số đo thực tế, ${fc.pending} lần đang chờ tới giờ` : "Đang chờ dự báo đầu tiên"}.
       Tab DỰ BÁO trên Google Sheet: ${esc(forecastSheetText(fc?.sheet))}.</p>
-    <div class="btn-row wrap"><span class="note">Tải Excel (dữ liệu gốc + dự báo & thực tế + sai số):</span>${[7, 30, 365].map(days).join("")}</div>`;
+    <div class="btn-row wrap"><span class="note">Tải Excel (dữ liệu gốc + dự báo & thực tế + sai số):</span>${[7, 30, 365].map(days).join("")}</div>
+    <p class="note">${esc(csvText(backend.snapshot?.csv))}</p>`;
   setHTML(el, `
     <div class="ml-state ${rf.validated ? "normal" : "learning"}">${icon(rf.validated ? "shield-check" : "loader")} ${rf.validated ? "Đã huấn luyện và kiểm chứng" : "Đang thu thập dữ liệu để kiểm chứng"}</div>
     <dl class="kv">
