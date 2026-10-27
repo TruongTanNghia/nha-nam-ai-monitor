@@ -16,6 +16,7 @@ from analyzer import SEV_RANK, Analyzer
 from controller import AutoController, explain_auto
 from firebase_client import Firebase
 from rf_model import RFAnalyzer, report_lines
+from sheet_sync import SheetSync
 from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, RESET_REASONS, SENSOR_KEYS, SENSORS, fmt, num, thresholds
 from storage import Storage
 from weather import Weather
@@ -36,6 +37,7 @@ ESP_OFFLINE_SEC = 60       # nhịp tim ESP_TS đứng yên 60 giây -> coi là 
 ESP_STALE_SEC = 300        # firmware cũ (không có ESP_TS): số liệu đứng yên 5 phút
 WEATHER_EVERY = 900        # cập nhật thời tiết 15 phút/lần
 RF_EVERY = 120             # dự đoán lại 2 phút/lần (huấn luyện lại mỗi giờ) để theo kịp khi cảm biến đổi mạnh
+SHEET_EVERY = 1800         # lấy Google Sheet (ESP32 ghi 1 phút/lần) 30 phút/lần để lấp dữ liệu lúc máy tính tắt
 
 
 def now_text(ts=None):
@@ -69,6 +71,7 @@ class Engine:
         self.ctrl = AutoController()
         self.weather = Weather(self.store)
         self.rf = RFAnalyzer(self.store, self.weather)
+        self.sheet = SheetSync(self.store)
         self.zalo = ZaloBot()
         self.outbox = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outbox")
         self.lock = threading.RLock()
@@ -102,6 +105,7 @@ class Engine:
         self.esp_restart_reason = None  # lý do khởi động lại vừa phát hiện, báo kèm tin "hoạt động lại"
         self.last_weather = 0
         self.last_rf = 0
+        self.last_sheet = 0
 
     # ------------------------------------------------------------------ setup
     def start(self):
@@ -139,10 +143,15 @@ class Engine:
             time.sleep(max(0.5, config.POLL_INTERVAL_SEC - (time.time() - started)))
 
     def _background(self):
-        """Thời tiết (15 phút/lần) + Random Forest (10 phút/lần): chạy riêng để không làm chậm vòng đọc cảm biến."""
+        """Thời tiết (15 phút/lần), Google Sheet (30 phút/lần), Random Forest (2 phút/lần): chạy riêng để không
+        làm chậm vòng đọc cảm biến."""
         while self.running:
             now = time.time()
             try:
+                if now - self.last_sheet >= (SHEET_EVERY if self.sheet.status["synced_at"] else 300):
+                    self.last_sheet = now
+                    if self.sheet.run() and self.rf.model is None:
+                        self.rf.last_train = 0  # có thêm dữ liệu cũ -> thử học lại ngay
                 if now - self.last_weather >= (WEATHER_EVERY if self.weather.updated else 120):
                     self.last_weather = now
                     if self.weather.refresh() and self.rf.result is None:
@@ -668,6 +677,7 @@ class Engine:
                 "muted_until": self.mute_until if self.mute_until > time.time() else None,
                 "rf": self.rf.result or self.rf.info,
                 "weather": self.weather.status(),
+                "sheet": self.sheet.status,
                 "esp_online": self.esp_online,
                 "hardware": {
                     "last_change_ts": self.hw_last_change,

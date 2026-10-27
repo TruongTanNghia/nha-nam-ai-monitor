@@ -239,6 +239,16 @@ function renderWeather() {
 /** Số gọn theo độ chính xác của cảm biến (pH 2 chữ số, còn lại 1) */
 const fmtNum = (k, v) => (k === "GT_PH" ? v.toFixed(2) : v < 10 ? v.toFixed(1) : Math.round(v).toString());
 
+/** Trạng thái lấy dữ liệu từ Google Sheet (lấp các đoạn máy chủ không chạy) */
+function sheetText(s) {
+  if (!s?.enabled) return "Chưa cài — đặt GOOGLE_SHEET_ID trong server/.env (xem docs/GOOGLE_SHEET.md)";
+  if (s.error) return `Lỗi: ${s.error}`;
+  if (!s.synced_at) return "Đang lấy dữ liệu…";
+  const late = s.latest && Date.now() / 1000 - s.latest > 900;
+  return `${s.rows} dòng, mới nhất ${s.latest ? fmtDateTime(s.latest * 1000) : "—"}`
+    + (late ? " — ESP32 chưa ghi Sheet gần đây (kiểm tra GOOGLE_SCRIPT_URL)" : "");
+}
+
 function renderRFModel() {
   const el = $("#rfModel");
   if (!backend.online) return setHTML(el, offlineHTML());
@@ -264,6 +274,7 @@ function renderRFModel() {
     <dl class="kv">
       <div><dt>Phương pháp</dt><dd>${esc(rf.method || "Random Forest")}</dd></div>
       <div><dt>Dữ liệu</dt><dd>${rf.samples ?? 0} mẫu (15 phút/mẫu)${rf.skipped ? `, đã loại ${rf.skipped} đoạn cảm biến lỗi` : ""} · ${period}</dd></div>
+      <div><dt>Google Sheet (ESP32 ghi 1 phút/lần)</dt><dd>${esc(sheetText(backend.snapshot?.sheet))}</dd></div>
       ${rf.validated ? `<div><dt>Kiểm chứng</dt><dd>Walk-forward ${rf.folds} lần, ${rf.test_samples} mẫu thử chưa thấy</dd></div>` : ""}
       <div><dt>Lần huấn luyện</dt><dd>${rf.trained_at ? timeAgo(rf.trained_at * 1000) : "—"}</dd></div>
     </dl>

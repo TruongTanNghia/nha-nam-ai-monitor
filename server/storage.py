@@ -109,6 +109,23 @@ class Storage:
             ).fetchall()
         return {int(r["b"]): dict(r) for r in rows}
 
+    def add_sheet_readings(self, rows):
+        """Bản ghi từ Google Sheet (1 phút/lần): chỉ thêm vào những phút máy chủ chưa có số liệu. Trả số dòng thêm."""
+        if not rows:
+            return 0
+        lo, hi = min(r["ts"] for r in rows), max(r["ts"] for r in rows)
+        cols = ", ".join(f'"{c}"' for c in READING_COLS)
+        marks = ", ".join("?" for _ in READING_COLS)
+        with self.lock, self.conn:
+            have = {m for (m,) in self.conn.execute(
+                "SELECT DISTINCT CAST(ts / 60 AS INTEGER) FROM readings WHERE ts BETWEEN ? AND ?", (lo - 60, hi + 60))}
+            new = [r for r in rows if int(r["ts"] // 60) not in have]
+            self.conn.executemany(
+                f"INSERT OR IGNORE INTO readings (ts, {cols}) VALUES (?, {marks})",
+                [[r["ts"]] + [r.get(c) for c in READING_COLS] for r in new],
+            )
+        return len(new)
+
     # ---------- thời tiết ngoài trời (theo giờ) ----------
     def add_weather(self, rows):
         with self.lock, self.conn:

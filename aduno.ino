@@ -343,6 +343,9 @@ bool sendToGoogleSheet() {
   url += "&doman=" + String(GT_DOMAN,0);
   url += "&ph=" + String(GT_PH, 1);
   url += "&anhsang=" + String(ANHSANG,0);
+  // Trang thai thiet bi -> may chu AI hoc duoc ca luc may tinh tat (google_sheet/Code.gs)
+  url += "&bom=" + String(BOM) + "&den=" + String(DEN) + "&quat=" + String(QUAT);
+  url += "&suong=" + String(SUONG) + "&mo=" + String(MO) + "&mode=" + String(MODE);
 
   http.begin(url);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);

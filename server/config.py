@@ -122,4 +122,8 @@ WEATHER_NAME = _str("WEATHER_NAME")
 if WEATHER_LAT is None or WEATHER_LON is None:
     WEATHER_LAT, WEATHER_LON, WEATHER_NAME = 10.2537, 105.9722, WEATHER_NAME or "Vĩnh Long"
 
+# ---------- Google Sheet ESP32 ghi 1 phút/lần (kể cả khi máy tính tắt) -> máy chủ lấy về lấp dữ liệu thiếu ----------
+GOOGLE_SHEET_ID = _str("GOOGLE_SHEET_ID")  # phần giữa /d/ và /edit trong link Sheet; để trống = không dùng
+GOOGLE_SHEET_GID = _str("GOOGLE_SHEET_GID", "0")
+
 DB_PATH = SERVER_DIR / "data" / "greenhouse.db"
