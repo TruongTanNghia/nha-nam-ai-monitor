@@ -563,7 +563,10 @@ async function syncBackend() {
   $("#connServer").classList.toggle("on", backend.online);
   // Mã phiên bản code máy chủ đang chạy -> biết máy đã lấy code mới chưa
   const ver = backend.online ? backend.health?.version : null;
-  $("#connServer span:last-child").textContent = ver ? `Máy chủ AI · ${ver}` : "Máy chủ AI";
+  // Máy chủ cũ (trước khi có mã phiên bản) vẫn chạy ngầm -> báo để tắt nó đi
+  const old = backend.online && !ver;
+  $("#connServer span:last-child").textContent = ver ? `Máy chủ AI · ${ver}` : old ? "Máy chủ AI · BẢN CŨ!" : "Máy chủ AI";
+  $("#connServer").title = old ? "Đang nối với máy chủ bản cũ còn chạy ngầm: đóng mọi cửa sổ Nhà Nấm rồi bấm lại CHAY_NHA_NAM.bat (hoặc khởi động lại máy)" : "";
   renderAnalysis();
   renderZalo();
   if (state.data) {

@@ -5,6 +5,7 @@ Chạy:  python server/app.py   rồi mở http://localhost:5000
 import hmac
 import logging
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -51,27 +52,61 @@ def _code_version():
         return "?"
 
 
-def _free_port(port):
-    """Tắt máy chủ Nhà Nấm cũ còn giữ cổng (vd chạy ngầm, hoặc cửa sổ cũ quên đóng). Trên Windows 2 tiến trình
-    có thể cùng nghe 1 cổng, web sẽ vẫn nói chuyện với bản CŨ dù đã chạy bản mới."""
-    if os.name != "nt":
-        return
+def _port_busy(port):
+    """Thử chiếm cổng ĐỘC QUYỀN: có tiến trình nào giữ cổng (kể cả chạy quyền admin) là báo bận."""
+    sock = socket.socket()
+    try:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        sock.bind((config.HOST, port))
+        return False
+    except OSError:
+        return True
+    finally:
+        sock.close()
+
+
+def _port_pids(port):
     try:
         lines = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10).stdout.splitlines()
     except (OSError, subprocess.SubprocessError):
-        return
-    pids = {int(c[-1]) for c in (ln.split() for ln in lines)
-            if len(c) >= 5 and c[1].endswith(f":{port}") and c[3] == "LISTENING" and c[-1].isdigit()}
-    for pid in pids - {os.getpid()}:
-        cmd = subprocess.run(["powershell", "-NoProfile", "-Command",
-                              f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
-                             capture_output=True, text=True, timeout=15).stdout.strip()
-        if "app.py" in cmd:
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=10)
-            log.warning("Đã tắt máy chủ Nhà Nấm CŨ đang giữ cổng %s (PID %s)", port, pid)
-            print(f"⚠️  Đã tắt máy chủ Nhà Nấm cũ đang giữ cổng {port} (PID {pid})")
-        else:
-            print(f"⚠️  Cổng {port} đang bị chương trình khác dùng (PID {pid}): {cmd[:120]}")
+        return set()
+    # Dòng đang nghe có địa chỉ đối diện "...:0" (không so chữ LISTENING: Windows tiếng Việt có thể dịch chữ này)
+    return {int(c[-1]) for c in (ln.split() for ln in lines)
+            if len(c) >= 5 and c[1].endswith(f":{port}") and c[2].endswith(":0") and c[-1].isdigit()} - {os.getpid()}
+
+
+def _free_port(port):
+    """Tắt máy chủ Nhà Nấm cũ còn giữ cổng (vd tác vụ chạy ẩn của bộ cài cũ, cửa sổ cũ quên đóng) rồi trả cổng
+    dùng được. Trên Windows 2 tiến trình có thể cùng nghe 1 cổng, web sẽ vẫn nói chuyện với bản CŨ dù đã chạy bản
+    mới -> không tắt được thì chuyển sang cổng khác."""
+    if os.name != "nt" or not _port_busy(port):
+        return port
+    for pid in _port_pids(port):
+        out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                              f"$p = Get-CimInstance Win32_Process -Filter 'ProcessId={pid}'; $p.Name; $p.CommandLine"],
+                             capture_output=True, text=True, timeout=15).stdout.strip().splitlines()
+        name, cmd = (out + ["", ""])[:2]
+        # Không đọc được dòng lệnh = tiến trình chạy quyền admin (bộ cài cũ) -> vẫn là python thì coi là bản cũ
+        if not (name.lower().startswith("python") and ("app.py" in cmd or not cmd)):
+            print(f"⚠️  Cổng {port} đang bị chương trình khác dùng (PID {pid}): {name} {cmd[:120]}")
+            continue
+        print(f"⚠️  Đang tắt máy chủ Nhà Nấm CŨ giữ cổng {port} (PID {pid})...")
+        if subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=10).returncode != 0:
+            print("    Bản cũ chạy quyền quản trị -> Windows sẽ hỏi quyền, bấm CÓ (Yes) để tắt nó.")
+            subprocess.run(["powershell", "-NoProfile", "-Command",
+                            f"Start-Process taskkill -ArgumentList '/F /PID {pid}' -Verb RunAs -Wait -WindowStyle Hidden"],
+                           capture_output=True, timeout=120)
+        log.warning("Tắt máy chủ Nhà Nấm CŨ đang giữ cổng %s (PID %s)", port, pid)
+    for _ in range(10):
+        if not _port_busy(port):
+            return port
+        time.sleep(0.5)
+    alt = next((p for p in range(port + 1, port + 50) if not _port_busy(p)), port)
+    print(f"⚠️  Cổng {port} vẫn bị giữ -> chạy ở cổng {alt}: http://localhost:{alt}. "
+          f"Nếu là bản Nhà Nấm cũ, khởi động lại máy tính để nó tắt hẳn.")
+    log.warning("Cổng %s vẫn bị giữ, chạy ở cổng %s", port, alt)
+    return alt
 
 
 VERSION = _code_version()
@@ -219,7 +254,7 @@ def mute():
 
 
 if __name__ == "__main__":
-    _free_port(config.PORT)
+    config.PORT = _free_port(config.PORT)
     engine.start()
     tunnel.start()
     print(f"\n🍄 Máy chủ AI Nhà Nấm: http://localhost:{config.PORT}  (bản code {VERSION}, thời tiết: {config.WEATHER_NAME})\n")

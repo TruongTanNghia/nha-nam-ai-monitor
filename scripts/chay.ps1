@@ -81,6 +81,12 @@ Get-CimInstance Win32_Process | Where-Object { Test-NhaNamProcess $_ } | ForEach
 if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $Root ".git"))) {
     $before = git -C $Root rev-parse --short HEAD 2>$null
     $out = git -C $Root pull --ff-only 2>&1
+    if ($LASTEXITCODE -ne 0 -and (git -C $Root status --porcelain --untracked-files=no)) {
+        # File sua tay chan cap nhat -> cat tam vao git stash (lay lai bang: git stash pop) roi lay code moi
+        git -C $Root stash push -m "Nha Nam: tu cat truoc khi cap nhat" 2>&1 | Out-Null
+        $out = git -C $Root pull --ff-only 2>&1
+        if ($LASTEXITCODE -eq 0) { Warn "Co file sua tay - da cat tam vao git stash de lay code moi" }
+    }
     $after = git -C $Root rev-parse --short HEAD 2>$null
     if ($before -ne $after) { Ok "Da cap nhat code moi: $before -> $after" }
     elseif ($out -match "Already up to date|Da cap nhat|up-to-date") { Ok "Code da la ban moi nhat ($after)" }
