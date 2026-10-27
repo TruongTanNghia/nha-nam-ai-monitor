@@ -1,58 +1,32 @@
 # Lưu dữ liệu 24/7 vào Google Sheet
 
-## Dữ liệu để AI học lấy từ đâu?
+## Cài đặt: 1 lần, khoảng 1 phút, KHÔNG phải nạp lại ESP32
 
-Có 2 nguồn, cùng đổ vào file `server/data/greenhouse.db` trên máy chạy máy chủ AI:
+1. Mở Google Sheet **NHÀ NẤM** → **Tiện ích mở rộng → Apps Script**.
+2. Xóa hết code cũ, dán toàn bộ file [`google_sheet/Code.gs`](../google_sheet/Code.gs) → bấm **Lưu** (biểu tượng đĩa mềm).
+3. Ở thanh trên cùng, ô chọn hàm: chọn **`CAI_DAT`** → bấm **Chạy**.
+4. Google hỏi quyền: chọn tài khoản → **Nâng cao → Đi tới… (không an toàn) → Cho phép**. Đây là script của chính mình nên an toàn.
 
-| Nguồn | Tần suất | Khi nào có |
-|---|---|---|
-| Máy chủ AI đọc Firebase | 5 giây/lần | chỉ khi máy tính đang chạy `CHAY_NHA_NAM.bat` |
-| **ESP32 ghi Google Sheet** | **1 phút/lần** | **24/7, kể cả khi máy tính tắt** |
+Xong. Nhật ký thực thi hiện chữ **XONG**. Từ giờ **Google tự đọc Firebase 1 phút/lần và ghi 1 dòng** lên trên cùng Sheet, kể cả khi máy tính tắt. Lúc mạch ESP32 tắt (nhịp tim `ESP_TS` đứng yên quá 3 phút) thì không ghi, để không có số cũ lặp lại. Chạy lại `CAI_DAT` bao nhiêu lần cũng không bị ghi trùng.
 
-Máy chủ tự lấy Google Sheet về **lúc khởi động và 30 phút/lần**. Phút nào máy chủ chưa có số liệu thì lấy từ Sheet. Nhờ vậy biểu đồ và mô hình Random Forest có đủ dữ liệu ngày lẫn đêm. Trạng thái hiện ở web: tab **Phân tích AI → Mô hình Random Forest → Google Sheet**.
+> Không cần link `/exec`, không cần sửa `secrets.h`, không cần nạp lại ESP32. Nếu ESP32 vẫn tự gửi lên link Apps Script (cách cũ) thì Google tự ngừng ghi, để không trùng dòng.
 
-## Cài đặt (một lần)
+## Tùy chọn: máy chủ AI dùng chung Sheet
 
-### 1. Tạo link Apps Script mới (link cũ đã chết)
+Không bắt buộc. File Excel tải trên web (bên dưới) đã có đủ dữ liệu gốc và bảng dự báo & thực tế. Nếu muốn thêm 2 việc sau:
+- máy chủ lấy dữ liệu Sheet về, lấp những lúc máy tính tắt (lúc khởi động, rồi 30 phút/lần) để Random Forest học đủ ngày đêm;
+- máy chủ ghi bảng dự báo & thực tế vào tab **DỰ BÁO** trên Sheet;
 
-1. Mở Google Sheet **NHÀ NẤM**.
-2. Chọn **Tiện ích mở rộng → Apps Script**. Xóa hết code cũ, dán toàn bộ nội dung file [`google_sheet/Code.gs`](../google_sheet/Code.gs) rồi bấm **Lưu**.
-3. Chọn **Triển khai → Tùy chọn triển khai mới**, bấm bánh răng và chọn **Ứng dụng web**:
-   - Thực thi dưới dạng: **Tôi**
-   - Người có quyền truy cập: **Bất kỳ ai**
-4. Bấm **Triển khai** và cấp quyền: chọn tài khoản → Nâng cao → Đi tới… (không an toàn) → Cho phép. Đây là script của chính mình nên an toàn.
-5. Chép **URL ứng dụng web** (kết thúc bằng `/exec`).
-6. Thử: dán vào trình duyệt `URL?sts=write&t=30&h=80&amdat=60&doman=200&ph=7&anhsang=300`. Phải hiện chữ **OK** và Sheet có thêm 1 dòng ở trên cùng. Thử xong xóa dòng đó đi.
+thì làm như sau:
+1. Apps Script → **Triển khai → Tùy chọn triển khai mới**, bánh răng chọn **Ứng dụng web**. Đặt Thực thi dưới dạng: **Tôi**, Người có quyền truy cập: **Bất kỳ ai** → **Triển khai** → chép link kết thúc bằng `/exec`.
+2. Thêm dòng `GOOGLE_SCRIPT_URL=<link /exec>` vào `server/.env`, rồi chạy lại `CHAY_NHA_NAM.bat`. Máy chủ cũng tự tìm link này trong `secrets.h` (thư mục dự án, thư mục bên cạnh, hoặc `D:\KHOA HOC KY THUAT\CLB TIN HOC\TIN HOC TRE 2026\nhanam\`).
 
-> Sau này sửa code Apps Script thì vào **Triển khai → Quản lý các bản triển khai → sửa (bút chì) → Phiên bản: Mới**. Làm như vậy URL được giữ nguyên, không phải nạp lại ESP32.
+Cửa sổ đen lúc chạy có dòng `Google Sheet: link Apps Script trong …`. Sheet **không cần chia sẻ** công khai. Trạng thái xem ở web: tab **Phân tích AI → Mô hình Random Forest → Google Sheet**.
 
-### 2. Cho ESP32 ghi vào link mới
-
-Trong `secrets.h` (cùng thư mục với file `.ino`):
-
-```cpp
-#define GOOGLE_SCRIPT_URL "https://script.google.com/macros/s/....../exec"
-```
-
-Nạp lại firmware (`aduno.ino`, hoặc file `.ino` đang dùng). Mở Serial Monitor sẽ thấy `Google Sheet HTTP Code: 200` mỗi phút.
-
-### 3. Máy chủ AI: không phải cài gì thêm
-
-Chạy `CHAY_NHA_NAM.bat`. Máy chủ **tự lấy link `/exec` trong `secrets.h`**, chọn file sửa gần nhất trong các chỗ sau:
-- thư mục dự án;
-- các thư mục nằm cạnh thư mục dự án;
-- `D:\KHOA HOC KY THUAT\CLB TIN HOC\TIN HOC TRE 2026\nhanam\`.
-
-Qua link đó, máy chủ:
-- **đọc dữ liệu ESP32 đã ghi** (lúc khởi động, rồi 30 phút/lần). Sheet **không cần chia sẻ** công khai.
-- **ghi bảng dự báo & thực tế** vào tab **DỰ BÁO**, tab này tự tạo.
-
-Cửa sổ đen lúc chạy có dòng `Google Sheet: link Apps Script trong …secrets.h`. Trên web, mục **Google Sheet** hiện số dòng và thời điểm dòng mới nhất. Nếu dòng mới nhất cũ hơn 15 phút, web báo “ESP32 chưa ghi Sheet gần đây”: kiểm tra lại bước 2.
-
-> `secrets.h` để ở chỗ khác thì thêm `GOOGLE_SCRIPT_URL=<link /exec>` vào `server/.env`.
+> Sau này sửa code Apps Script: **Triển khai → Quản lý các bản triển khai → bút chì → Phiên bản: Mới**. Làm vậy link được giữ nguyên.
 > Cách cũ vẫn dùng được: chia sẻ Sheet “Bất kỳ ai có đường liên kết → Người xem” và đặt `GOOGLE_SHEET_ID` (phần giữa `/d/` và `/edit` của link Sheet).
 
-### 4. Bảng dự báo & thực tế (tab DỰ BÁO)
+### Bảng dự báo & thực tế (tab DỰ BÁO)
 
 Máy chủ ghi lại **mọi lần Random Forest dự báo** (15 phút/lần, cho 1, 2, 3 giờ tới). Tới giờ được dự báo, máy chủ lấy **số đo thật** (trung bình ±7,5 phút) để so. Sau đó máy chủ ghi dòng đó lên tab **DỰ BÁO**, tab này nằm sau trang dữ liệu gốc. Dòng đầu tiên có sau khoảng 2–4 giờ máy chủ chạy liên tục.
 

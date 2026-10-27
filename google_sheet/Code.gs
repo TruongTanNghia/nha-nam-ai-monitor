@@ -1,32 +1,63 @@
+/** @OnlyCurrentDoc */
 /**
- * Nhận dữ liệu ESP32 gửi lên mỗi phút và ghi vào Google Sheet "NHÀ NẤM" (dòng mới nhất ở trên cùng).
+ * Ghi dữ liệu Nhà Nấm vào Google Sheet "NHÀ NẤM" mỗi phút (dòng mới nhất ở trên cùng), kể cả khi máy tính tắt.
  *
- * Cài đặt (xem docs/GOOGLE_SHEET.md):
- *   Mở Google Sheet → Tiện ích mở rộng → Apps Script → dán toàn bộ file này → Lưu
- *   → Triển khai → Tùy chọn triển khai mới → Loại: Ứng dụng web
- *     Thực thi dưới dạng: Tôi · Người có quyền truy cập: Bất kỳ ai → Triển khai
- *   → chép URL kết thúc bằng /exec vào GOOGLE_SCRIPT_URL trong secrets.h rồi nạp lại ESP32.
+ * CÀI ĐẶT (1 lần, khoảng 1 phút, KHÔNG phải nạp lại ESP32):
+ *   Mở Google Sheet → Tiện ích mở rộng → Apps Script → xóa code cũ, dán toàn bộ file này → Lưu
+ *   → ở thanh trên chọn hàm CAI_DAT → bấm Chạy → cấp quyền (Nâng cao → Đi tới… → Cho phép).
+ *   Xong: Google tự đọc Firebase 1 phút/lần và ghi 1 dòng (mạch tắt thì không ghi số cũ).
  *
- * ESP32 gọi:  <URL>?sts=write&t=..&h=..&amdat=..&doman=..&ph=..&anhsang=..&bom=..&den=..&quat=..&suong=..&mo=..&mode=..
- * Máy chủ AI (tự lấy link trong secrets.h):
- *   <URL>?sts=read&rows=N      -> N dòng mới nhất dạng CSV (lấp dữ liệu lúc máy tính tắt; Sheet không cần chia sẻ)
+ * Tùy chọn (máy chủ AI lấp dữ liệu lúc máy tính tắt + ghi tab DỰ BÁO): Triển khai → Tùy chọn triển khai mới
+ *   → Ứng dụng web (Thực thi: Tôi · Truy cập: Bất kỳ ai) → chép link /exec vào GOOGLE_SCRIPT_URL trong server/.env.
+ *   <URL>?sts=read&rows=N      -> N dòng mới nhất dạng CSV
  *   POST JSON sts=forecast     -> bảng "dự báo & thực tế" vào tab DỰ BÁO
+ *   <URL>?sts=write&t=..&h=..  -> cách cũ: ESP32 tự gửi (khi đó Google tự ngừng ghi để không trùng dòng)
  */
 const SHEET_NAME = "";  // để trống = trang tính đầu tiên
 const TZ = "Asia/Ho_Chi_Minh";
+const FIREBASE_URL = "https://nha-kinh-84aa2-default-rtdb.asia-southeast1.firebasedatabase.app";
+const FIREBASE_AUTH = "";  // database secret nếu đã khóa Firebase rules
+const ESP_OFFLINE_MS = 3 * 60 * 1000;  // nhịp tim ESP_TS đứng yên quá 3 phút = mạch tắt -> không ghi
 const HEADERS = ["NGÀY", "GIỜ", "NHIỆT ĐỘ\n(°C)", "ĐỘ ẨM KHÔNG KHÍ\n(%)", "ĐỘ ẨM ĐẤT\n(%)", "ĐỘ MẶN\n(PPM)", "PH",
   "ÁNH SÁNG\n(LUX)", "BƠM", "ĐÈN", "QUẠT", "PHUN SƯƠNG", "MÀN CHE MỞ", "CHẾ ĐỘ AUTO"];
 const PARAMS = ["t", "h", "amdat", "doman", "ph", "anhsang", "bom", "den", "quat", "suong", "mo", "mode"];
+const FIREBASE_KEYS = ["t", "h", "GT_AMDAT", "GT_DOMAN", "GT_PH", "ANHSANG", "BOM", "DEN", "QUAT", "SUONG", "MO", "MODE"];
+
+/** CHẠY HÀM NÀY 1 LẦN: tạo lịch tự ghi 1 phút/lần (chạy lại cũng không bị trùng lịch). */
+function CAI_DAT() {
+  ScriptApp.getProjectTriggers()
+    .filter((t) => t.getHandlerFunction() === "ghiTuFirebase")
+    .forEach((t) => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger("ghiTuFirebase").timeBased().everyMinutes(1).create();
+  const kq = ghiTuFirebase();
+  Logger.log("XONG. Google sẽ tự ghi dữ liệu vào Sheet mỗi phút, kể cả khi tắt máy tính. Lần này: " + kq);
+}
+
+/** Lịch 1 phút/lần: đọc số liệu ESP32 đang gửi lên Firebase rồi ghi 1 dòng. */
+function ghiTuFirebase() {
+  const espWrite = Number(PropertiesService.getScriptProperties().getProperty("espWrite") || 0);
+  if (Date.now() - espWrite < 90 * 1000) return "ESP32 đang tự ghi qua link -> bỏ qua để không trùng dòng";
+  let d;
+  try {
+    const res = UrlFetchApp.fetch(FIREBASE_URL + "/.json" + (FIREBASE_AUTH ? "?auth=" + FIREBASE_AUTH : ""),
+      { muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) return "Firebase lỗi " + res.getResponseCode();
+    d = JSON.parse(res.getContentText()) || {};
+  } catch (err) {
+    return "Không đọc được Firebase: " + err;  // mạng chập chờn: bỏ qua phút này, không gửi email lỗi
+  }
+  if (d.ESP_TS && Date.now() - Number(d.ESP_TS) > ESP_OFFLINE_MS) return "mạch ESP32 đang tắt -> không ghi";
+  ghiDong(FIREBASE_KEYS.map((k) => d[k]));
+  return "đã ghi 1 dòng";
+}
 
 function dataSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   return SHEET_NAME ? ss.getSheetByName(SHEET_NAME) : ss.getSheets()[0];
 }
 
-function doGet(e) {
-  const p = (e && e.parameter) || {};
-  if (p.sts === "read") return readCsv(Number(p.rows) || 3000);
-  if (p.sts !== "write") return ContentService.createTextOutput("Nha Nam: Apps Script dang chay");
+/** Chèn 1 dòng mới ở trên cùng (dưới tiêu đề). values theo thứ tự PARAMS. */
+function ghiDong(values) {
   const sh = dataSheet();
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -35,16 +66,23 @@ function doGet(e) {
       sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);  // thêm tiêu đề cột thiết bị (giữ nguyên 8 cột cũ)
     }
     const now = new Date();
-    const num = (k) => (p[k] === undefined || p[k] === "" ? "" : Number(p[k]));
+    const num = (v) => (v === undefined || v === null || v === "" || isNaN(Number(v)) ? "" : Number(v));
     const row = [Utilities.formatDate(now, TZ, "dd/MM/yyyy"), Utilities.formatDate(now, TZ, "HH:mm:ss")]
-      .concat(PARAMS.map(num));
+      .concat(values.map(num));
     sh.insertRowAfter(1);
-    const target = sh.getRange(2, 1, 1, row.length);
     sh.getRange(2, 1, 1, 2).setNumberFormat("@");  // ngày/giờ dạng chữ: không bị Sheets đổi thành tháng/ngày
-    target.setValues([row]);
+    sh.getRange(2, 1, 1, row.length).setValues([row]);
   } finally {
     lock.releaseLock();
   }
+}
+
+function doGet(e) {
+  const p = (e && e.parameter) || {};
+  if (p.sts === "read") return readCsv(Number(p.rows) || 3000);
+  if (p.sts !== "write") return ContentService.createTextOutput("Nha Nam: Apps Script dang chay");
+  PropertiesService.getScriptProperties().setProperty("espWrite", String(Date.now()));
+  ghiDong(PARAMS.map((k) => p[k]));
   return ContentService.createTextOutput("OK");
 }
 

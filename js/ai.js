@@ -241,12 +241,12 @@ const fmtNum = (k, v) => (k === "GT_PH" ? v.toFixed(2) : v < 10 ? v.toFixed(1) :
 
 /** Trạng thái lấy dữ liệu từ Google Sheet (lấp các đoạn máy chủ không chạy) */
 function sheetText(s) {
-  if (!s?.enabled) return "Chưa cài: chưa thấy link Apps Script trong secrets.h (xem docs/GOOGLE_SHEET.md)";
+  if (!s?.enabled) return "Không bắt buộc (Sheet vẫn tự ghi 24/7): muốn máy chủ lấy dữ liệu Sheet về thì dán link /exec vào server/.env (xem docs/GOOGLE_SHEET.md)";
   if (s.error) return `Lỗi: ${s.error}`;
   if (!s.synced_at) return "Đang lấy dữ liệu…";
   const late = s.latest && Date.now() / 1000 - s.latest > 900;
   return `${s.rows} dòng, mới nhất ${s.latest ? fmtDateTime(s.latest * 1000) : "—"}`
-    + (late ? " — ESP32 chưa ghi Sheet gần đây (kiểm tra GOOGLE_SCRIPT_URL)" : "");
+    + (late ? " — Sheet chưa có dòng mới gần đây (mạch tắt, hoặc chưa chạy CAI_DAT trong Apps Script)" : "");
 }
 
 /** Bảng sai số: ô = sai số trung bình RF, % = tốt hơn/kém hơn cách "giữ nguyên giá trị" */
@@ -264,7 +264,7 @@ function errorGrid(rows, UNIT, good) {
 
 /** Tab DỰ BÁO trên Google Sheet (máy chủ ghi bảng dự báo & thực tế) */
 function forecastSheetText(s) {
-  if (!s?.enabled) return "Chưa cài: chưa thấy link Apps Script trong secrets.h (xem docs/GOOGLE_SHEET.md)";
+  if (!s?.enabled) return "Không bắt buộc (Sheet vẫn tự ghi 24/7): muốn máy chủ lấy dữ liệu Sheet về thì dán link /exec vào server/.env (xem docs/GOOGLE_SHEET.md)";
   if (s.error) return `Lỗi: ${s.error}`;
   return s.sent_at ? `Đã ghi ${s.sent} dòng, lần cuối ${timeAgo(s.sent_at * 1000)}` : "Chờ dự báo đầu tiên tới giờ kiểm (sau 1–3 giờ + 1 giờ)";
 }

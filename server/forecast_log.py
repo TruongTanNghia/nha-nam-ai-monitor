@@ -3,7 +3,7 @@
 - Đây là kiểm chứng trên dữ liệu thật sau khi dự báo (ngoài kiểm chứng walk-forward lúc học): mỗi dòng có
   giá trị lúc dự báo, số mô hình dự báo, số đo thực tế -> tính sai số, so với cách "giữ nguyên giá trị".
 - Thực tế = trung bình số đo ±7,5 phút quanh thời điểm được dự báo (giống cách mô hình học: trung bình 15 phút).
-- Ghi các dòng đã có kết quả lên tab "DỰ BÁO" của Google Sheet (GOOGLE_SCRIPT_URL trong server/.env).
+- Ghi các dòng đã có kết quả lên tab "DỰ BÁO" của Google Sheet (cần link /exec - không bắt buộc).
 """
 import datetime as dt
 import logging
