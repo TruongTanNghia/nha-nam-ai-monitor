@@ -144,6 +144,8 @@ if ($periodic -gt 0 -and $periodic -lt 600) { Set-EnvValue "PERIODIC_REPORT_SEC"
 # Bao MOI lan bat/tat + mach tat/mo lai -> nang han muc cu 12/100 tin len 30/300
 if ((Get-EnvValue "ZALO_MAX_PER_HOUR") -eq "12") { Set-EnvValue "ZALO_MAX_PER_HOUR" "30" }
 if ((Get-EnvValue "ZALO_MAX_PER_DAY") -eq "100") { Set-EnvValue "ZALO_MAX_PER_DAY" "300" }
+# BTC can du lieu goc -> giu 1 nam thay vi 30 ngay
+if ((Get-EnvValue "HISTORY_RETENTION_DAYS") -eq "30") { Set-EnvValue "HISTORY_RETENTION_DAYS" "365" }
 if ($firstRun) {
     $key = Read-Host "    Dan API key Gemini (Enter de bo qua)"
     if ($key) {

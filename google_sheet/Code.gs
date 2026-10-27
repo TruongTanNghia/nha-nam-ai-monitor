@@ -8,6 +8,7 @@
  *   → chép URL kết thúc bằng /exec vào GOOGLE_SCRIPT_URL trong secrets.h rồi nạp lại ESP32.
  *
  * ESP32 gọi:  <URL>?sts=write&t=..&h=..&amdat=..&doman=..&ph=..&anhsang=..&bom=..&den=..&quat=..&suong=..&mo=..&mode=..
+ * Máy chủ AI gửi (POST JSON, GOOGLE_SCRIPT_URL trong server/.env): bảng "dự báo & thực tế" -> tab DỰ BÁO
  */
 const SHEET_NAME = "";  // để trống = trang tính đầu tiên
 const TZ = "Asia/Ho_Chi_Minh";
@@ -38,4 +39,32 @@ function doGet(e) {
     lock.releaseLock();
   }
   return ContentService.createTextOutput("OK");
+}
+
+/** Máy chủ AI ghi các lần dự báo đã có kết quả thực tế vào tab DỰ BÁO (tự tạo, nằm sau trang dữ liệu gốc). */
+function doPost(e) {
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return ContentService.createTextOutput("LOI: noi dung khong phai JSON");
+  }
+  if (body.sts !== "forecast" || !body.rows || !body.rows.length) return ContentService.createTextOutput("OK 0");
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sh = ss.getSheetByName(body.tab) || ss.insertSheet(body.tab, ss.getNumSheets());
+    if (sh.getLastRow() === 0) {
+      sh.getRange(1, 1, 1, body.headers.length).setValues([body.headers]).setFontWeight("bold").setWrap(true);
+      sh.setFrozenRows(1);
+    }
+    const rows = body.rows.map((r) => r.map((v) => (v === null || v === undefined ? "" : v)));
+    const start = sh.getLastRow() + 1;
+    sh.getRange(start, 1, rows.length, 3).setNumberFormat("@");  // ngày/giờ dạng chữ
+    sh.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
+  } finally {
+    lock.releaseLock();
+  }
+  return ContentService.createTextOutput("OK " + body.rows.length);
 }

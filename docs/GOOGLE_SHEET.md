@@ -47,6 +47,32 @@ Nạp lại firmware `aduno.ino`. Mở Serial Monitor sẽ thấy `Google Sheet 
 
 3. Chạy lại `CHAY_NHA_NAM.bat`. Trên web, mục **Google Sheet** hiện số dòng và thời điểm dòng mới nhất. Nếu dòng mới nhất cũ hơn 15 phút, web báo “ESP32 chưa ghi Sheet gần đây”: kiểm tra lại bước 2.
 
+### 4. Bảng dự báo & thực tế (tab DỰ BÁO)
+
+Máy chủ ghi lại **mọi lần Random Forest dự báo** (15 phút/lần, cho 1, 2, 3 giờ tới). Tới giờ được dự báo, máy chủ lấy **số đo thật** (trung bình ±7,5 phút) để so. Sau đó máy chủ ghi dòng đó lên tab **DỰ BÁO** của Google Sheet. Tab này tự tạo và nằm sau trang dữ liệu gốc.
+
+Trong `server/.env` thêm **cùng link /exec** đã dán vào `secrets.h`:
+
+```
+GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/....../exec
+```
+
+Mỗi dòng của tab DỰ BÁO gồm: lúc dự báo, dự báo cho lúc nào, sau mấy giờ. Với mỗi chỉ số (nhiệt độ, độ ẩm không khí, độ ẩm đất, ánh sáng, pH, độ mặn) có 3 cột: **giá trị lúc dự báo**, **RF dự báo**, **thực tế**.
+
+## Tải file Excel (nộp BTC)
+
+Web → tab **Phân tích AI** → thẻ **Mô hình Random Forest** → nút **7 / 30 / 365 ngày**. Hoặc mở `http://localhost:5000/api/export.xlsx?days=30`. File gồm các trang:
+
+| Trang | Nội dung |
+|---|---|
+| Giới thiệu | nguồn dữ liệu, cách tính |
+| Dữ liệu gốc | mỗi phút: 6 cảm biến + trạng thái thiết bị + số lần đo trong phút |
+| Dự báo & thực tế | giống tab DỰ BÁO |
+| Tổng hợp sai số | sai số trung bình của Random Forest và của cách "giữ nguyên giá trị", % tốt hơn, theo từng chỉ số × 1/2/3 giờ; kèm kết quả kiểm chứng walk-forward lúc huấn luyện |
+| Thời tiết | Open-Meteo theo giờ |
+
+Máy chủ giữ dữ liệu 365 ngày (`HISTORY_RETENTION_DAYS`). Google Sheet thì giữ mãi.
+
 ## Cột trong Sheet
 
 `NGÀY, GIỜ, NHIỆT ĐỘ, ĐỘ ẨM KHÔNG KHÍ, ĐỘ ẨM ĐẤT, ĐỘ MẶN, PH, ÁNH SÁNG` (8 cột cũ, giữ nguyên) + `BƠM, ĐÈN, QUẠT, PHUN SƯƠNG, MÀN CHE MỞ, CHẾ ĐỘ AUTO` (mới, 1 = bật). Dòng mới nhất nằm trên cùng.

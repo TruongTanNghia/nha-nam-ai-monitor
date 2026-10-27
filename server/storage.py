@@ -47,6 +47,12 @@ class Storage:
                 CREATE TABLE IF NOT EXISTS weather_hourly (
                     ts INTEGER PRIMARY KEY, temp REAL, hum REAL, cloud REAL, rad REAL, precip REAL, wind REAL
                 );
+                -- Mỗi lần dự báo (15 phút/lần): giá trị lúc dự báo + Random Forest dự báo cho made_ts + hours giờ
+                CREATE TABLE IF NOT EXISTS forecasts (
+                    made_bucket INTEGER, hours INTEGER, key TEXT, made_ts REAL, target_ts REAL,
+                    now_value REAL, predicted REAL, basis TEXT, sent INTEGER DEFAULT 0,
+                    PRIMARY KEY (made_bucket, hours, key)
+                );
                 """
             )
 
@@ -109,6 +115,26 @@ class Storage:
             ).fetchall()
         return {int(r["b"]): dict(r) for r in rows}
 
+    def minute_readings(self, since_ts):
+        """Trung bình từng phút (dữ liệu gốc để xuất file) + số lần đo trong phút."""
+        avgs = ", ".join(f'AVG("{c}") AS "{c}"' for c in READING_COLS)
+        with self.lock:
+            rows = self.conn.execute(
+                f"""SELECT CAST(ts / 60 AS INTEGER) * 60 AS ts, COUNT(*) AS n, {avgs}
+                    FROM readings WHERE ts >= ? GROUP BY CAST(ts / 60 AS INTEGER) ORDER BY ts""",
+                (since_ts,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mean_between(self, start_ts, end_ts):
+        """Trung bình cảm biến trong [start, end]; None nếu không có số đo."""
+        avgs = ", ".join(f'AVG("{k}") AS "{k}"' for k in SENSOR_KEYS)
+        with self.lock:
+            row = self.conn.execute(
+                f"SELECT COUNT(*) AS n, {avgs} FROM readings WHERE ts >= ? AND ts <= ?", (start_ts, end_ts)
+            ).fetchone()
+        return dict(row) if row["n"] else None
+
     def add_sheet_readings(self, rows):
         """Bản ghi từ Google Sheet (1 phút/lần): chỉ thêm vào những phút máy chủ chưa có số liệu. Trả số dòng thêm."""
         if not rows:
@@ -140,6 +166,39 @@ class Storage:
                 "SELECT * FROM weather_hourly WHERE ts >= ? AND ts <= ? ORDER BY ts", (start_ts, end_ts)
             ).fetchall()
         return {r["ts"]: dict(r) for r in rows}
+
+    # ---------- nhật ký dự báo (đối chiếu với thực tế) ----------
+    def add_forecasts(self, rows):
+        """rows: (made_ts, hours, key, now_value, predicted, basis). Mỗi khung 15 phút chỉ giữ lần dự báo đầu tiên."""
+        with self.lock, self.conn:
+            self.conn.executemany(
+                """INSERT OR IGNORE INTO forecasts (made_bucket, hours, key, made_ts, target_ts, now_value, predicted, basis)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                [(int(m // 900) * 900, h, k, m, m + h * 3600, nv, p, b) for m, h, k, nv, p, b in rows],
+            )
+
+    def forecasts_between(self, start_ts, end_ts):
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT * FROM forecasts WHERE made_ts >= ? AND made_ts <= ? ORDER BY made_ts, hours", (start_ts, end_ts)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def forecasts_unsent(self, done_before_ts, limit=200):
+        """Các lần dự báo đã tới giờ kiểm (target_ts <= done_before_ts) mà chưa ghi lên Google Sheet."""
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT f.* FROM forecasts f JOIN (
+                       SELECT DISTINCT made_bucket, hours FROM forecasts WHERE sent = 0 AND target_ts <= ?
+                       ORDER BY made_bucket, hours LIMIT ?) g
+                   ON f.made_bucket = g.made_bucket AND f.hours = g.hours ORDER BY f.made_ts, f.hours""",
+                (done_before_ts, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_forecasts_sent(self, pairs):
+        with self.lock, self.conn:
+            self.conn.executemany("UPDATE forecasts SET sent = 1 WHERE made_bucket = ? AND hours = ?", pairs)
 
     def prune(self):
         cutoff = time.time() - config.HISTORY_RETENTION_DAYS * 86400

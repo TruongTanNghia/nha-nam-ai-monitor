@@ -23,6 +23,7 @@ for stream in (sys.stdout, sys.stderr):  # console Windows mặc định không 
 from flask import Flask, Response, abort, jsonify, request, send_from_directory  # noqa: E402
 
 import config  # noqa: E402
+import export_xlsx as export_file  # noqa: E402
 import llm  # noqa: E402
 from engine import Engine, now_text  # noqa: E402
 from tunnel import Tunnel  # noqa: E402
@@ -192,6 +193,19 @@ def snapshot():
 def history():
     range_key = request.args.get("range", "1h")
     return jsonify(engine.store.history(range_key))
+
+
+@app.get("/api/export.xlsx")
+def export_xlsx():
+    """File Excel dữ liệu gốc + dự báo & thực tế (nộp BTC)."""
+    days = max(1, min(int(request.args.get("days", 30)), config.HISTORY_RETENTION_DAYS))
+    try:
+        content = export_file.build(engine, days)
+    except ImportError:
+        return jsonify({"error": "Thiếu thư viện openpyxl: chạy lại CHAY_NHA_NAM.bat để tự cài"}), 500
+    name = time.strftime("Nha_Nam_du_lieu_%Y%m%d_%H%M.xlsx")
+    return Response(content, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.get("/api/alerts")

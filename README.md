@@ -73,8 +73,8 @@ pH và độ mặn **không trung bình hóa** với nhiệt độ hay ánh sán
 - **Luật chuyên gia**: vượt ngưỡng kéo dài > 2 phút (tránh báo nhầm do nhiễu), cảm biến lỗi/phi lý, nhiễu (giật số), báo 0 liên tục, đứng yên (ESP32 mất kết nối).
 - **Thiết bị**: bơm chạy 8 phút mà đất không ẩm lên, quạt 15 phút không hạ nhiệt, phun sương không tăng ẩm, đèn bật không sáng hơn, màn che nhận cả MỞ & ĐÓNG, bật/tắt liên tục (≥ 6 lần/10 phút), bơm/phun sương chạy quá lâu.
 
-### Dữ liệu lưu 24/7 (server/sheet_sync.py, google_sheet/Code.gs)
-ESP32 ghi Google Sheet 1 phút/lần kể cả khi máy tính tắt; máy chủ AI tự lấy Sheet về (khởi động + 30 phút/lần) để lấp các đoạn nó không chạy, nên biểu đồ và mô hình có đủ ngày đêm. Cài đặt: [docs/GOOGLE_SHEET.md](docs/GOOGLE_SHEET.md).
+### Dữ liệu lưu 24/7 (server/sheet_sync.py, server/forecast_log.py, google_sheet/Code.gs)
+ESP32 ghi Google Sheet 1 phút/lần kể cả khi máy tính tắt; máy chủ AI tự lấy Sheet về (khởi động + 30 phút/lần) để lấp các đoạn nó không chạy, nên biểu đồ và mô hình có đủ ngày đêm. Mỗi lần dự báo được lưu lại; tới giờ thì so với số đo thật, ghi vào tab DỰ BÁO của Sheet. Web có nút tải Excel gồm dữ liệu gốc, dự báo & thực tế và tổng hợp sai số. Cài đặt: [docs/GOOGLE_SHEET.md](docs/GOOGLE_SHEET.md).
 
 ### Random Forest + thời tiết ngoài trời (server/rf_model.py, server/weather.py) — CHỈ THAM KHẢO
 Phương pháp, kiểm chứng và hạn chế: [docs/PHUONG_PHAP_DU_BAO.md](docs/PHUONG_PHAP_DU_BAO.md).

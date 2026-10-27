@@ -112,7 +112,7 @@ DAILY_REPORT_HOUR = _int("DAILY_REPORT_HOUR", 7)  # -1 để tắt
 PERIODIC_REPORT_SEC = _int("PERIODIC_REPORT_SEC", 3600)  # gửi tình trạng định kỳ qua Zalo, 0 = tắt
 if 0 < PERIODIC_REPORT_SEC < 600:  # 15 giây/lần làm bot hết hạn mức tin nhắn trong vài giờ
     PERIODIC_REPORT_SEC = 600
-HISTORY_RETENTION_DAYS = _int("HISTORY_RETENTION_DAYS", 30)
+HISTORY_RETENTION_DAYS = _int("HISTORY_RETENTION_DAYS", 365)  # giữ dữ liệu gốc 1 năm (BTC cần số liệu gốc)
 
 # ---------- Thời tiết ngoài trời (Open-Meteo) cho phân tích Random Forest ----------
 # Mặc định: TP. Vĩnh Long (nơi đặt nhà nấm). Đặt WEATHER_LAT/WEATHER_LON trong .env để dùng tọa độ khác
@@ -125,5 +125,7 @@ if WEATHER_LAT is None or WEATHER_LON is None:
 # ---------- Google Sheet ESP32 ghi 1 phút/lần (kể cả khi máy tính tắt) -> máy chủ lấy về lấp dữ liệu thiếu ----------
 GOOGLE_SHEET_ID = _str("GOOGLE_SHEET_ID")  # phần giữa /d/ và /edit trong link Sheet; để trống = không dùng
 GOOGLE_SHEET_GID = _str("GOOGLE_SHEET_GID", "0")
+# Link Apps Script /exec (giống GOOGLE_SCRIPT_URL trong secrets.h): máy chủ ghi bảng "dự báo & thực tế" vào tab DỰ BÁO
+GOOGLE_SCRIPT_URL = _str("GOOGLE_SCRIPT_URL")
 
 DB_PATH = SERVER_DIR / "data" / "greenhouse.db"

@@ -15,6 +15,7 @@ import llm
 from analyzer import SEV_RANK, Analyzer
 from controller import AutoController, explain_auto
 from firebase_client import Firebase
+from forecast_log import ForecastLog
 from rf_model import RFAnalyzer, report_lines
 from sheet_sync import SheetSync
 from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, RESET_REASONS, SENSOR_KEYS, SENSORS, fmt, num, thresholds
@@ -72,6 +73,7 @@ class Engine:
         self.weather = Weather(self.store)
         self.rf = RFAnalyzer(self.store, self.weather)
         self.sheet = SheetSync(self.store)
+        self.forecasts = ForecastLog(self.store)
         self.zalo = ZaloBot()
         self.outbox = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outbox")
         self.lock = threading.RLock()
@@ -106,6 +108,7 @@ class Engine:
         self.last_weather = 0
         self.last_rf = 0
         self.last_sheet = 0
+        self.last_sheet_push = 0
 
     # ------------------------------------------------------------------ setup
     def start(self):
@@ -143,8 +146,8 @@ class Engine:
             time.sleep(max(0.5, config.POLL_INTERVAL_SEC - (time.time() - started)))
 
     def _background(self):
-        """Thời tiết (15 phút/lần), Google Sheet (30 phút/lần), Random Forest (2 phút/lần): chạy riêng để không
-        làm chậm vòng đọc cảm biến."""
+        """Thời tiết (15 phút/lần), Google Sheet (30 phút/lần), Random Forest (2 phút/lần) + nhật ký dự báo
+        (ghi tab DỰ BÁO 15 phút/lần): chạy riêng để không làm chậm vòng đọc cảm biến."""
         while self.running:
             now = time.time()
             try:
@@ -160,7 +163,11 @@ class Engine:
                     self.last_rf = now
                     with self.lock:
                         rows, data = list(self.recent), dict(self.latest_data)
-                    self.rf.analyze(rows, data, now)
+                    self.forecasts.record(self.rf.analyze(rows, data, now))
+                if now - self.last_sheet_push >= SHEET_EVERY / 2:
+                    self.last_sheet_push = now
+                    self.forecasts.push_sheet(now)
+                self.forecasts.refresh_summary(now)
             except Exception:
                 log.exception("Lỗi phân tích thời tiết / Random Forest")
             time.sleep(20)
@@ -678,6 +685,7 @@ class Engine:
                 "rf": self.rf.result or self.rf.info,
                 "weather": self.weather.status(),
                 "sheet": self.sheet.status,
+                "forecast_check": self.forecasts.status(),
                 "esp_online": self.esp_online,
                 "hardware": {
                     "last_change_ts": self.hw_last_change,
