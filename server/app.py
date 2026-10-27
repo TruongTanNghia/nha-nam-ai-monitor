@@ -271,5 +271,7 @@ if __name__ == "__main__":
     config.PORT = _free_port(config.PORT)
     engine.start()
     tunnel.start()
-    print(f"\n🍄 Máy chủ AI Nhà Nấm: http://localhost:{config.PORT}  (bản code {VERSION}, thời tiết: {config.WEATHER_NAME})\n")
+    print(f"\n🍄 Máy chủ AI Nhà Nấm: http://localhost:{config.PORT}  (bản code {VERSION}, thời tiết: {config.WEATHER_NAME})")
+    print("   Google Sheet: " + (f"link Apps Script trong {config.GOOGLE_SCRIPT_FROM}" if config.GOOGLE_SCRIPT_URL
+                                 else "chưa thấy link Apps Script trong secrets.h") + "\n")
     app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)

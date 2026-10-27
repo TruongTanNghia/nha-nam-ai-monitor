@@ -2,7 +2,8 @@
 
 ESP32 ghi Sheet 1 phút/lần, chạy 24/7 kể cả khi máy tính tắt (google_sheet/Code.gs). Máy chủ chỉ tự lưu số liệu
 khi đang chạy, nên định kỳ lấy Sheet về để lấp các phút còn thiếu -> biểu đồ và Random Forest có đủ ngày đêm.
-Sheet cần chia sẻ "Bất kỳ ai có đường liên kết đều xem được"; đặt GOOGLE_SHEET_ID trong server/.env.
+Đọc qua Apps Script (GOOGLE_SCRIPT_URL, tự lấy trong secrets.h; Sheet không cần chia sẻ), hoặc qua link tải CSV
+nếu đặt GOOGLE_SHEET_ID (Sheet chia sẻ "Bất kỳ ai có đường liên kết đều xem được").
 """
 import csv
 import datetime as dt
@@ -20,6 +21,7 @@ log = logging.getLogger("sheet")
 SENSOR_COLS = {"t": 2, "h": 3, "GT_AMDAT": 4, "GT_DOMAN": 5, "GT_PH": 6, "ANHSANG": 7}
 DEVICE_COLS = {"BOM": 8, "DEN": 9, "QUAT": 10, "SUONG": 11, "MO": 12, "MODE": 13}
 RECENT_ROWS = 3000   # dòng mới nhất ở trên cùng: lần sau chỉ lấy ~2 ngày gần nhất
+FIRST_ROWS = 50000   # lần đầu (qua Apps Script): ~35 ngày
 
 
 def _num(text):
@@ -54,17 +56,20 @@ class SheetSync:
     def __init__(self, store):
         self.store = store
         self.full_done = False
-        self.status = {"enabled": bool(config.GOOGLE_SHEET_ID), "rows": 0, "added": 0, "latest": None,
+        self.status = {"enabled": bool(config.GOOGLE_SHEET_ID or config.GOOGLE_SCRIPT_URL), "rows": 0, "added": 0, "latest": None,
                        "synced_at": None, "error": None}
 
     def run(self):
         """Trả số bản ghi mới thêm vào CSDL (0 nếu chưa cài / lỗi mạng)."""
-        if not config.GOOGLE_SHEET_ID:
+        if config.GOOGLE_SHEET_ID:
+            url = (f"https://docs.google.com/spreadsheets/d/{config.GOOGLE_SHEET_ID}/export"
+                   f"?format=csv&gid={config.GOOGLE_SHEET_GID}")
+            if self.full_done:
+                url += f"&range=A1:N{RECENT_ROWS}"
+        elif config.GOOGLE_SCRIPT_URL:
+            url = f"{config.GOOGLE_SCRIPT_URL}?sts=read&rows={RECENT_ROWS if self.full_done else FIRST_ROWS}"
+        else:
             return 0
-        url = (f"https://docs.google.com/spreadsheets/d/{config.GOOGLE_SHEET_ID}/export"
-               f"?format=csv&gid={config.GOOGLE_SHEET_GID}")
-        if self.full_done:
-            url += f"&range=A1:N{RECENT_ROWS}"
         try:
             try:
                 res = requests.get(url, timeout=60)
@@ -73,7 +78,8 @@ class SheetSync:
                 res = requests.get(url, timeout=60)
             res.raise_for_status()
             if "text/csv" not in res.headers.get("Content-Type", ""):
-                raise ValueError("Sheet chưa chia sẻ 'Bất kỳ ai có đường liên kết đều xem được'")
+                raise ValueError("Sheet chưa chia sẻ 'Bất kỳ ai có đường liên kết đều xem được'" if config.GOOGLE_SHEET_ID
+                                 else "Apps Script chưa phải bản mới: dán lại google_sheet/Code.gs và triển khai")
             rows = parse_csv(res.content.decode("utf-8"))
         except (requests.RequestException, ValueError) as exc:
             self.status["error"] = str(exc)

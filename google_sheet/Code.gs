@@ -8,7 +8,9 @@
  *   → chép URL kết thúc bằng /exec vào GOOGLE_SCRIPT_URL trong secrets.h rồi nạp lại ESP32.
  *
  * ESP32 gọi:  <URL>?sts=write&t=..&h=..&amdat=..&doman=..&ph=..&anhsang=..&bom=..&den=..&quat=..&suong=..&mo=..&mode=..
- * Máy chủ AI gửi (POST JSON, GOOGLE_SCRIPT_URL trong server/.env): bảng "dự báo & thực tế" -> tab DỰ BÁO
+ * Máy chủ AI (tự lấy link trong secrets.h):
+ *   <URL>?sts=read&rows=N      -> N dòng mới nhất dạng CSV (lấp dữ liệu lúc máy tính tắt; Sheet không cần chia sẻ)
+ *   POST JSON sts=forecast     -> bảng "dự báo & thực tế" vào tab DỰ BÁO
  */
 const SHEET_NAME = "";  // để trống = trang tính đầu tiên
 const TZ = "Asia/Ho_Chi_Minh";
@@ -16,11 +18,16 @@ const HEADERS = ["NGÀY", "GIỜ", "NHIỆT ĐỘ\n(°C)", "ĐỘ ẨM KHÔNG KH
   "ÁNH SÁNG\n(LUX)", "BƠM", "ĐÈN", "QUẠT", "PHUN SƯƠNG", "MÀN CHE MỞ", "CHẾ ĐỘ AUTO"];
 const PARAMS = ["t", "h", "amdat", "doman", "ph", "anhsang", "bom", "den", "quat", "suong", "mo", "mode"];
 
+function dataSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return SHEET_NAME ? ss.getSheetByName(SHEET_NAME) : ss.getSheets()[0];
+}
+
 function doGet(e) {
   const p = (e && e.parameter) || {};
+  if (p.sts === "read") return readCsv(Number(p.rows) || 3000);
   if (p.sts !== "write") return ContentService.createTextOutput("Nha Nam: Apps Script dang chay");
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sh = SHEET_NAME ? ss.getSheetByName(SHEET_NAME) : ss.getSheets()[0];
+  const sh = dataSheet();
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -39,6 +46,16 @@ function doGet(e) {
     lock.releaseLock();
   }
   return ContentService.createTextOutput("OK");
+}
+
+/** `rows` dòng mới nhất (cùng tiêu đề) dạng CSV, giống "Tải xuống → CSV" của Google Sheet. */
+function readCsv(rows) {
+  const sh = dataSheet();
+  const n = Math.min(sh.getLastRow(), rows + 1);
+  if (n < 1) return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.CSV);
+  const cell = (v) => (/[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
+  const text = sh.getRange(1, 1, n, HEADERS.length).getDisplayValues().map((r) => r.map(cell).join(",")).join("\n");
+  return ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.CSV);
 }
 
 /** Máy chủ AI ghi các lần dự báo đã có kết quả thực tế vào tab DỰ BÁO (tự tạo, nằm sau trang dữ liệu gốc). */

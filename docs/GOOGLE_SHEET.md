@@ -34,28 +34,27 @@ Trong `secrets.h` (cùng thư mục với file `.ino`):
 #define GOOGLE_SCRIPT_URL "https://script.google.com/macros/s/....../exec"
 ```
 
-Nạp lại firmware `aduno.ino`. Mở Serial Monitor sẽ thấy `Google Sheet HTTP Code: 200` mỗi phút.
+Nạp lại firmware (`aduno.ino`, hoặc file `.ino` đang dùng). Mở Serial Monitor sẽ thấy `Google Sheet HTTP Code: 200` mỗi phút.
 
-### 3. Cho máy chủ AI đọc Sheet
+### 3. Máy chủ AI: không phải cài gì thêm
 
-1. Trong Google Sheet bấm **Chia sẻ** và chọn **Bất kỳ ai có đường liên kết → Người xem**.
-2. Trong `server/.env` thêm dòng sau. Mã Sheet là phần giữa `/d/` và `/edit` trong link.
+Chạy `CHAY_NHA_NAM.bat`. Máy chủ **tự lấy link `/exec` trong `secrets.h`**, chọn file sửa gần nhất trong các chỗ sau:
+- thư mục dự án;
+- các thư mục nằm cạnh thư mục dự án;
+- `D:\KHOA HOC KY THUAT\CLB TIN HOC\TIN HOC TRE 2026\nhanam\`.
 
-   ```
-   GOOGLE_SHEET_ID=ma_sheet_cua_ban
-   ```
+Qua link đó, máy chủ:
+- **đọc dữ liệu ESP32 đã ghi** (lúc khởi động, rồi 30 phút/lần). Sheet **không cần chia sẻ** công khai.
+- **ghi bảng dự báo & thực tế** vào tab **DỰ BÁO**, tab này tự tạo.
 
-3. Chạy lại `CHAY_NHA_NAM.bat`. Trên web, mục **Google Sheet** hiện số dòng và thời điểm dòng mới nhất. Nếu dòng mới nhất cũ hơn 15 phút, web báo “ESP32 chưa ghi Sheet gần đây”: kiểm tra lại bước 2.
+Cửa sổ đen lúc chạy có dòng `Google Sheet: link Apps Script trong …secrets.h`. Trên web, mục **Google Sheet** hiện số dòng và thời điểm dòng mới nhất. Nếu dòng mới nhất cũ hơn 15 phút, web báo “ESP32 chưa ghi Sheet gần đây”: kiểm tra lại bước 2.
+
+> `secrets.h` để ở chỗ khác thì thêm `GOOGLE_SCRIPT_URL=<link /exec>` vào `server/.env`.
+> Cách cũ vẫn dùng được: chia sẻ Sheet “Bất kỳ ai có đường liên kết → Người xem” và đặt `GOOGLE_SHEET_ID` (phần giữa `/d/` và `/edit` của link Sheet).
 
 ### 4. Bảng dự báo & thực tế (tab DỰ BÁO)
 
-Máy chủ ghi lại **mọi lần Random Forest dự báo** (15 phút/lần, cho 1, 2, 3 giờ tới). Tới giờ được dự báo, máy chủ lấy **số đo thật** (trung bình ±7,5 phút) để so. Sau đó máy chủ ghi dòng đó lên tab **DỰ BÁO** của Google Sheet. Tab này tự tạo và nằm sau trang dữ liệu gốc.
-
-Trong `server/.env` thêm **cùng link /exec** đã dán vào `secrets.h`:
-
-```
-GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/....../exec
-```
+Máy chủ ghi lại **mọi lần Random Forest dự báo** (15 phút/lần, cho 1, 2, 3 giờ tới). Tới giờ được dự báo, máy chủ lấy **số đo thật** (trung bình ±7,5 phút) để so. Sau đó máy chủ ghi dòng đó lên tab **DỰ BÁO**, tab này nằm sau trang dữ liệu gốc. Dòng đầu tiên có sau khoảng 2–4 giờ máy chủ chạy liên tục.
 
 Mỗi dòng của tab DỰ BÁO gồm: lúc dự báo, dự báo cho lúc nào, sau mấy giờ. Với mỗi chỉ số (nhiệt độ, độ ẩm không khí, độ ẩm đất, ánh sáng, pH, độ mặn) có 3 cột: **giá trị lúc dự báo**, **RF dự báo**, **thực tế**.
 

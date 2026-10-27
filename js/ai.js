@@ -241,7 +241,7 @@ const fmtNum = (k, v) => (k === "GT_PH" ? v.toFixed(2) : v < 10 ? v.toFixed(1) :
 
 /** Trạng thái lấy dữ liệu từ Google Sheet (lấp các đoạn máy chủ không chạy) */
 function sheetText(s) {
-  if (!s?.enabled) return "Chưa cài — đặt GOOGLE_SHEET_ID trong server/.env (xem docs/GOOGLE_SHEET.md)";
+  if (!s?.enabled) return "Chưa cài: chưa thấy link Apps Script trong secrets.h (xem docs/GOOGLE_SHEET.md)";
   if (s.error) return `Lỗi: ${s.error}`;
   if (!s.synced_at) return "Đang lấy dữ liệu…";
   const late = s.latest && Date.now() / 1000 - s.latest > 900;
@@ -264,7 +264,7 @@ function errorGrid(rows, UNIT, good) {
 
 /** Tab DỰ BÁO trên Google Sheet (máy chủ ghi bảng dự báo & thực tế) */
 function forecastSheetText(s) {
-  if (!s?.enabled) return "Chưa cài: đặt GOOGLE_SCRIPT_URL trong server/.env (xem docs/GOOGLE_SHEET.md)";
+  if (!s?.enabled) return "Chưa cài: chưa thấy link Apps Script trong secrets.h (xem docs/GOOGLE_SHEET.md)";
   if (s.error) return `Lỗi: ${s.error}`;
   return s.sent_at ? `Đã ghi ${s.sent} dòng, lần cuối ${timeAgo(s.sent_at * 1000)}` : "Chờ dự báo đầu tiên tới giờ kiểm (sau 1–3 giờ + 1 giờ)";
 }

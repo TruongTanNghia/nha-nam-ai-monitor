@@ -1,5 +1,6 @@
 """Đọc cấu hình từ server/.env (hoặc biến môi trường)."""
 import os
+import re
 from pathlib import Path
 
 try:
@@ -125,7 +126,29 @@ if WEATHER_LAT is None or WEATHER_LON is None:
 # ---------- Google Sheet ESP32 ghi 1 phút/lần (kể cả khi máy tính tắt) -> máy chủ lấy về lấp dữ liệu thiếu ----------
 GOOGLE_SHEET_ID = _str("GOOGLE_SHEET_ID")  # phần giữa /d/ và /edit trong link Sheet; để trống = không dùng
 GOOGLE_SHEET_GID = _str("GOOGLE_SHEET_GID", "0")
-# Link Apps Script /exec (giống GOOGLE_SCRIPT_URL trong secrets.h): máy chủ ghi bảng "dự báo & thực tế" vào tab DỰ BÁO
+
+
+def _script_url_from_secrets():
+    """Link Apps Script trong secrets.h của firmware (file mới sửa gần nhất) -> khỏi điền lại vào .env."""
+    files = [PROJECT_DIR / "secrets.h", *PROJECT_DIR.parent.glob("*/secrets.h"),
+             Path("D:/KHOA HOC KY THUAT/CLB TIN HOC/TIN HOC TRE 2026/nhanam/secrets.h")]  # thư mục nạp ESP32 của anh Hữu
+    found = []
+    for f in files:
+        try:
+            m = re.search(r'#define\s+GOOGLE_SCRIPT_URL\s+"(https://script\.google\.com/[^"\s]+/exec)"',
+                          f.read_text(encoding="utf-8", errors="ignore"))
+            if m:
+                found.append((f.stat().st_mtime, m.group(1), str(f)))
+        except OSError:
+            continue
+    return max(found)[1:] if found else ("", "")
+
+
+# Link Apps Script /exec: máy chủ đọc dữ liệu ESP32 ghi (Sheet không cần chia sẻ) + ghi tab DỰ BÁO.
+# Để trống = tự lấy trong secrets.h (cùng link ESP32 dùng)
 GOOGLE_SCRIPT_URL = _str("GOOGLE_SCRIPT_URL")
+GOOGLE_SCRIPT_FROM = "server/.env" if GOOGLE_SCRIPT_URL else ""
+if not GOOGLE_SCRIPT_URL:
+    GOOGLE_SCRIPT_URL, GOOGLE_SCRIPT_FROM = _script_url_from_secrets()
 
 DB_PATH = SERVER_DIR / "data" / "greenhouse.db"
