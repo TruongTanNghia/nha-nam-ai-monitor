@@ -172,9 +172,12 @@ class Engine:
                     self.last_sheet_push = now
                     self.forecasts.push_sheet(now)
                 self.forecasts.refresh_summary(now)
-                self.csv.update(now)
             except Exception:
                 log.exception("Lỗi phân tích thời tiết / Random Forest")
+            try:  # file CSV trên máy: vẫn ghi khi mất mạng
+                self.csv.update(now)
+            except Exception:
+                log.exception("Lỗi ghi file CSV")
             time.sleep(20)
 
     # ------------------------------------------------------------------- tick
