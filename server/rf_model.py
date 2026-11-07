@@ -88,7 +88,7 @@ def _clean(r):
     """Trạng thái dùng được: mọi chỉ số trong khoảng vật lý. Độ ẩm đất 0% (cảm biến chưa cắm) KHÔNG loại cả mẫu —
     nhiệt độ, độ ẩm, ánh sáng... vẫn dùng được; lúc rút/cắm lại cảm biến (0% <-> 100%) bị lọc bởi MAX_JUMP,
     và khi đất đang báo 0% thì không dự báo đất."""
-    if r is None or (r.get("n", 0) >= 10 and r.get("uniq") == 1):
+    if r is None or (r.get("n", 0) >= 10 and r.get("frozen")):
         return False  # số liệu đứng yên: mạch tắt / mất mạng
     return all(is_valid(k, r.get(k)) for k in INDOOR)
 
@@ -242,7 +242,12 @@ class RFAnalyzer:
         """recent_rows: số liệu gần đây (cũ -> mới); data: bản ghi Firebase mới nhất."""
         now = now or time.time()
         if now - self.last_train >= (RETRAIN_SEC if self.model is not None else RETRY_SEC):
-            self.train(now)
+            try:
+                self.train(now)
+            except Exception as exc:  # vd ổ đĩa đầy: giữ mô hình đang có, vẫn dự báo, lần sau học lại
+                self.last_train = now
+                self.info["note"] = f"Học lại lỗi ({exc}) — đang dùng mô hình lần trước"
+                log.exception("Random Forest học lại lỗi")
         th = thresholds(data)
         live = {k: num(data.get(k)) for k in INDOOR}
         rows = [r for r in recent_rows if r["ts"] >= now - STEP] or recent_rows[-1:]

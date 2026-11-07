@@ -9,7 +9,8 @@ from sensors import DEVICE_KEYS, SENSOR_KEYS, ZERO_FAULT
 READING_COLS = SENSOR_KEYS + DEVICE_KEYS + ["MODE"]
 FORECAST_VER = 2  # bản 1: mô hình cũ học cả số liệu đứng yên lúc mạch tắt -> không tính vào bảng đối chiếu
 # Cả 6 cảm biến không đổi chút nào trong cả khoảng = số liệu đứng yên (mạch tắt/mất mạng, Firebase giữ số cũ)
-UNIQ = "COUNT(DISTINCT " + " || '|' || ".join(f'IFNULL("{k}", \'\')' for k in SENSOR_KEYS) + ")"
+# (so MIN = MAX từng cảm biến: không cần bảng tạm như COUNT(DISTINCT), không tốn ổ đĩa khi dữ liệu nhiều)
+FROZEN = "(" + " AND ".join(f'MIN("{k}") IS MAX("{k}")' for k in SENSOR_KEYS) + ")"
 
 
 def _avg(col):
@@ -39,6 +40,7 @@ class Storage:
             self.conn.executescript(
                 f"""
                 PRAGMA journal_mode=WAL;
+                PRAGMA temp_store=MEMORY;
                 CREATE TABLE IF NOT EXISTS readings (ts REAL PRIMARY KEY, {cols});
                 CREATE TABLE IF NOT EXISTS device_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,7 +121,7 @@ class Storage:
         devices = ", ".join(f'AVG("{k}") AS "{k}"' for k in DEVICE_KEYS)
         with self.lock:
             rows = self.conn.execute(
-                f"""SELECT CAST(ts / ? AS INTEGER) * ? AS b, COUNT(*) AS n, {UNIQ} AS uniq, {sensors}, {devices}
+                f"""SELECT CAST(ts / ? AS INTEGER) * ? AS b, COUNT(*) AS n, {FROZEN} AS frozen, {sensors}, {devices}
                     FROM readings WHERE ts >= ? GROUP BY b HAVING n >= ? ORDER BY b""",
                 (size, size, since_ts, min_samples),
             ).fetchall()
@@ -141,9 +143,9 @@ class Storage:
         avgs = ", ".join(f'{_avg(k)} AS "{k}"' for k in SENSOR_KEYS)
         with self.lock:
             row = self.conn.execute(
-                f"SELECT COUNT(*) AS n, {UNIQ} AS uniq, {avgs} FROM readings WHERE ts >= ? AND ts <= ?", (start_ts, end_ts)
+                f"SELECT COUNT(*) AS n, {FROZEN} AS frozen, {avgs} FROM readings WHERE ts >= ? AND ts <= ?", (start_ts, end_ts)
             ).fetchone()
-        if not row["n"] or (row["n"] >= 10 and row["uniq"] == 1):
+        if not row["n"] or (row["n"] >= 10 and row["frozen"]):
             return None
         return dict(row)
 
