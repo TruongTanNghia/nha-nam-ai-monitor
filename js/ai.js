@@ -261,9 +261,9 @@ function errorGrid(rows, UNIT, good, persist = () => false) {
       ${RF_TARGETS.map(([k, name]) => `<div class="rf-name">${name}</div>` + [1, 2, 3].map((h) => {
         const e = rows.find((x) => x.key === k && x.hours === h);
         if (!e) return `<div class="rf-val" title="Chưa có lần dự báo nào tới giờ kiểm">—</div>`;
-        const tip = `Dự báo: sai ${fmtNum(k, e.mae)}${UNIT[k]} · giữ nguyên: sai ${fmtNum(k, e.mae_base)}${UNIT[k]} · ${e.n} lần so`;
+        const tip = `Dự báo sai trung bình ${fmtNum(k, e.mae)}${UNIT[k]}; nếu chỉ "giữ nguyên giá trị hiện tại" thì sai ${fmtNum(k, e.mae_base)}${UNIT[k]} · ${e.n} lần so`;
         if (e.n < MIN_CHECKS) return `<div class="rf-val persist" title="${esc(tip)}">đang đo<small>${e.n}/${MIN_CHECKS} lần so</small></div>`;
-        const note = persist(e) ? "giữ nguyên" : `${e.skill > 0 ? "+" : ""}${e.skill}%`;
+        const note = persist(e) ? "giữ nguyên" : e.skill > 0 ? `tốt hơn ${e.skill}%` : e.skill < 0 ? `kém hơn ${-e.skill}%` : "ngang";
         return `<div class="rf-val ${good(e) ? "good" : "persist"}" title="${esc(tip)}">±${fmtNum(k, e.mae)}${UNIT[k]}<small>${note}</small></div>`;
       }).join("")).join("")}
     </div>`;
@@ -293,14 +293,14 @@ function renderRFModel() {
   const evalTable = ev.length ? `
     <div class="meter-label"><span>Kiểm chứng trên dữ liệu chưa thấy (sai số trung bình)</span></div>
     ${errorGrid(ev, UNIT, (e) => e.use_rf, (e) => !e.use_rf)}
-    <p class="note">% = dự báo chính xác hơn (+) cách "giữ nguyên giá trị hiện tại" bao nhiêu. Ô "giữ nguyên" (màu xám): kiểm chứng thấy Random Forest chưa giúp được nên dự báo = giá trị hiện tại (thường do chỉ số gần như không đổi, hoặc chưa đủ dữ liệu) và không dùng để đưa gợi ý.</p>` : "";
+    <p class="note">Mỗi ô: ±số = dự báo sai trung bình bao nhiêu (cùng đơn vị với chỉ số); "tốt hơn/kém hơn %" = so với cách đơn giản nhất là đoán "giữ nguyên giá trị hiện tại". Ô "giữ nguyên" (màu xám): kiểm chứng thấy Random Forest chưa giúp được nên dự báo = giá trị hiện tại (thường do chỉ số gần như không đổi, hoặc chưa đủ dữ liệu) và không dùng để đưa gợi ý.</p>` : "";
   // Đối chiếu sau khi dự báo: mỗi lần dự báo được lưu lại, tới giờ thì so với số đo thật
   const fc = backend.snapshot?.forecast_check;
   const days = (d) => `<a class="btn" href="${esc(backend.url)}/api/export.xlsx?days=${d}" download>${icon("download")} ${d} ngày</a>`;
   const checkHTML = `
     <div class="meter-label"><span>Đối chiếu dự báo với thực tế (sau khi dự báo)</span></div>
     ${fc?.rows?.length ? errorGrid(fc.rows, UNIT, (e) => e.skill > 0, (e) => e.persist) : ""}
-    <p class="note">${fc ? `${fc.checked} lần dự báo đã có số đo thực tế, ${fc.pending} lần đang chờ tới giờ` : "Đang chờ dự báo đầu tiên"}.
+    <p class="note">${fc ? `${fc.checked} lần dự báo đã có số đo thực tế, ${fc.pending} lần đang chờ tới giờ` : "Đang chờ dự báo đầu tiên"}. ±số = dự báo lệch thực tế trung bình bao nhiêu; "tốt hơn/kém hơn %" = so với đoán "giữ nguyên giá trị lúc dự báo" (không phải giá trị độ ẩm, nhiệt độ…).
       Tab DỰ BÁO trên Google Sheet: ${esc(forecastSheetText(fc?.sheet))}.</p>
     <div class="btn-row wrap"><span class="note">Tải Excel (dữ liệu gốc + dự báo & thực tế + sai số):</span>${[7, 30, 365].map(days).join("")}</div>
     <p class="note">${esc(csvText(backend.snapshot?.csv))}</p>`;
