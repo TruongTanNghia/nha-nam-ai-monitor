@@ -116,6 +116,7 @@ class Engine:
         self.esp_offline_since = None
         self.esp_restart_reason = None  # lý do khởi động lại vừa phát hiện, báo kèm tin "hoạt động lại"
         self.last_weather = 0
+        self.last_backfill = 0
         self.last_rf = 0
         self.last_sheet = 0
         self.last_sheet_push = 0
@@ -171,6 +172,10 @@ class Engine:
                     self.last_weather = now
                     if self.weather.refresh() and self.rf.result is None:
                         self.last_rf = 0  # có thời tiết lần đầu -> phân tích ngay
+                if now - self.last_backfill >= 86400 and self.weather.updated:
+                    self.last_backfill = now
+                    if self.weather.backfill():
+                        self.rf.last_train = 0  # có thêm dữ liệu cũ dùng được -> học lại ngay
                 if now - self.last_rf >= RF_EVERY and self.latest_data and self.esp_online is not False:
                     self.last_rf = now
                     with self.lock:

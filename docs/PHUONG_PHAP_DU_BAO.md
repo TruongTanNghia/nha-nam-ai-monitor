@@ -11,7 +11,7 @@ Dự báo sau **1, 2 và 3 giờ** cho 6 chỉ số trong nhà nấm: nhiệt đ
 | Nguồn | Nội dung | Tần suất |
 |---|---|---|
 | Cảm biến ESP32 (qua Firebase) | nhiệt độ, độ ẩm KK, ánh sáng, độ ẩm đất, pH, độ mặn, trạng thái 5 thiết bị | 5 giây/lần, lưu SQLite; **chỉ lưu khi mạch đang gửi** (nhịp tim `ESP_TS` còn đổi) |
-| Open-Meteo (miễn phí, không cần key) | nhiệt độ, độ ẩm, mây, bức xạ mặt trời, lượng mưa, gió ngoài trời | theo giờ: 31 ngày qua + 2 ngày tới |
+| Open-Meteo (miễn phí, không cần key) | nhiệt độ, độ ẩm, mây, bức xạ mặt trời, lượng mưa, gió ngoài trời | theo giờ: 31 ngày qua + 2 ngày tới; giờ cũ hơn lấy từ kho lưu trữ (archive) |
 
 **Trạng thái:** cứ 15 phút lấy trung bình các lần đo trong 15 phút đó (lọc nhiễu của cảm biến, vẫn bám kịp khi chỉ số đổi nhanh).
 
@@ -30,7 +30,7 @@ Số đoạn bị loại được hiển thị trên web.
 
 ## 4. Đặc trưng đầu vào (28 biến)
 - Trạng thái trong nhà lúc τ: 6 chỉ số.
-- Xu hướng: mức thay đổi trong 1 giờ qua của nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng (biến trễ – lag – chuẩn trong dự báo chuỗi thời gian; cho mô hình biết đang nóng lên hay nguội đi). Cần máy chủ chạy ít nhất 1 giờ mới dự báo.
+- Xu hướng: mức thay đổi trong 1 giờ qua của nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng (biến trễ – lag – chuẩn trong dự báo chuỗi thời gian; cho mô hình biết đang nóng lên hay nguội đi). Giờ đầu sau khi bật máy chưa có xu hướng: để trống, Random Forest của scikit-learn (≥ 1.4) tự xử lý giá trị thiếu, nên vẫn học và dự báo được.
 - Tỉ lệ thời gian bật của 5 thiết bị trong 15 phút đó.
 - Thời tiết lúc τ: 6 biến.
 - Thời tiết lúc τ + h (nhiệt độ, độ ẩm, bức xạ, mưa): 4 biến. Khi học dùng số đo thật; khi dự báo dùng dự báo của Open-Meteo.
@@ -46,7 +46,8 @@ Số đoạn bị loại được hiển thị trên web.
   - Cách kết hợp này đảm bảo dự báo không kém mốc chuẩn ở những ô mà Random Forest chưa học được gì.
   - Học *mức thay đổi* thay vì giá trị tuyệt đối: khi dữ liệu ít, mô hình không bị kéo về giá trị trung bình lịch sử.
   - Dự báo **trực tiếp** từng mốc giờ, không lặp từng bước: sai số không cộng dồn.
-- Học lại mỗi 15 phút trên toàn bộ dữ liệu 30 ngày gần nhất; dự báo tính lại mỗi 2 phút.
+- Học lại mỗi 15 phút trên **toàn bộ dữ liệu đã lưu** (tối đa 365 ngày, 20.000 mẫu gần nhất); dự báo tính lại mỗi 2 phút. Giờ cũ chưa có thời tiết (máy chủ lâu không chạy) được lấy bù từ kho lưu trữ Open-Meteo (ERA5).
+- Độ ẩm đất tính từ số đo mới nhất thay cho trung bình 15 phút, vì đổi bậc khi máy bơm bật/tắt.
 
 ## 6. Kiểm chứng
 - **Walk-forward theo thời gian (5 đoạn):** chia khoảng thời gian có dữ liệu thành các đoạn liên tiếp. Mỗi lần thử trên một đoạn **sau**, mô hình chưa thấy đoạn đó. Không xáo trộn dữ liệu theo thời gian, vì xáo trộn sẽ cho kết quả đẹp giả.
@@ -58,7 +59,7 @@ Số đoạn bị loại được hiển thị trên web.
   - Skill (%) = (1 − MAE<sub>mô hình</sub> / MAE<sub>giữ nguyên</sub>) × 100. Dương nghĩa là mô hình tốt hơn.
 - **Quy tắc hiển thị:** với mỗi cặp (chỉ số, mốc giờ), nếu Random Forest không làm sai số nhỏ hơn (w = 0 hoặc skill ≤ 0) thì dự báo = **giữ nguyên**: ô màu xám, ghi “giữ nguyên” và **không dùng để đưa gợi ý**.
 - **Đối chiếu sau khi dự báo (dữ liệu thật):** mỗi lần dự báo được lưu lại. Tới giờ được dự báo, máy chủ so với trung bình số đo ±7,5 phút. Ô có ít hơn 8 lần so thì ghi “đang đo”, vì 1 lần đo lỗi có thể làm lệch cả ô. Bảng này chỉ tính các dự báo từ bản sửa này trở đi; dự báo của bản cũ (học cả số liệu đứng yên) vẫn nằm trong cơ sở dữ liệu nhưng không tính.
-- **Chưa kiểm chứng thì chưa dự báo:** cần ít nhất 60 mẫu và 2 lần kiểm chứng, thường là khoảng 84 mẫu. Máy chủ mới cần khoảng **10 giờ mạch ESP32 và máy tính chạy liền** (chạy liền S giờ được khoảng 12·S − 36 mẫu, vì mỗi mẫu cần trạng thái 1 giờ trước và số đo 1–3 giờ sau). Mỗi lần tắt máy hoặc mạch mất điện, giờ đầu sau khi bật lại chưa tính được. Trước đó web ghi “AI đang học” kèm số giờ còn thiếu. Trong lúc đó web vẫn báo các chỉ số **đang** ngoài ngưỡng.
+- **Chưa kiểm chứng thì chưa dự báo:** cần ít nhất 60 mẫu và 2 lần kiểm chứng, thường là khoảng 84 mẫu. Máy chủ mới (chưa có dữ liệu) cần khoảng **9 giờ mạch ESP32 và máy tính chạy liền** (chạy liền S giờ được khoảng 12·S − 24 mẫu, vì mỗi mẫu cần số đo thật 1–3 giờ sau). Dữ liệu của các lần chạy trước đều được dùng, nên các lần sau có dự báo ngay. Trước đó web ghi “AI đang học” kèm số giờ còn thiếu. Trong lúc đó web vẫn báo các chỉ số **đang** ngoài ngưỡng.
 
 ## 7. Khoảng sai số
 Mỗi ô dự báo kèm **±**: phân vị 80% của sai số tuyệt đối đo được khi kiểm chứng. Nghĩa là khoảng 80% lần dự báo trước đây có sai số không vượt quá mức này.
@@ -81,14 +82,14 @@ Mỗi ô dự báo kèm **±**: phân vị 80% của sai số tuyệt đối đo
 
 | Chỉ số | Bản cũ +1 / +2 / +3 giờ | Bản này +1 / +2 / +3 giờ |
 |---|---|---|
-| Nhiệt độ | +7% / +19% / +28% | **+65% / +62% / +57%** |
-| Độ ẩm KK | 0% / +9% / +16% | **+64% / +60% / +59%** |
-| Độ ẩm đất | −13% / −11% / −7% | −4% / −3% / +1% |
-| Ánh sáng | +21% / +32% / +37% | **+30% / +36% / +36%** |
-| pH | −9% / 0% / +5% | +14% / +12% / −1% |
-| Độ mặn | −5% / −3% / −1% | **+87% / +87% / +87%** |
+| Nhiệt độ | +7% / +19% / +28% | **+71% / +68% / +64%** |
+| Độ ẩm KK | 0% / +9% / +16% | **+72% / +69% / +69%** |
+| Độ ẩm đất | −13% / −11% / −7% | +4% / −1% / −1% |
+| Ánh sáng | +21% / +32% / +37% | **+16% / +30% / +37%** |
+| pH | −9% / 0% / +5% | +5% / +6% / −9% |
+| Độ mặn | −5% / −3% / −1% | **+86% / +85% / +85%** |
 
-Lúc học (walk-forward), bản cũ chỉ 9/18 ô dương (thấp nhất −39%), bản này 14/18 ô dương, các ô còn lại dùng "giữ nguyên". Số liệu thật của nhà nấm sẽ khác, nên xem bảng trên web.
+Lúc học (walk-forward), bản cũ chỉ 9/18 ô dương (thấp nhất −39%), bản này 15/18 ô dương, các ô còn lại dùng "giữ nguyên". Số liệu thật của nhà nấm sẽ khác, nên xem bảng trên web.
 
 ## Tài liệu tham khảo
 - L. Breiman (2001). *Random Forests*. Machine Learning 45(1), 5–32.

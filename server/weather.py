@@ -2,6 +2,7 @@
 
 Vị trí: WEATHER_LAT/WEATHER_LON trong server/.env, mặc định TP. Vĩnh Long (config.py).
 Lấy thời tiết hiện tại + theo giờ 31 ngày qua và 2 ngày tới, lưu vào SQLite để mô hình Random Forest học.
+Giờ cũ hơn có số đo cảm biến mà chưa có thời tiết (máy chủ lâu không chạy) -> lấy bù từ kho lưu trữ Open-Meteo.
 """
 import logging
 import time
@@ -13,6 +14,8 @@ import config
 log = logging.getLogger("weather")
 
 API = "https://api.open-meteo.com/v1/forecast"
+ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"   # thời tiết đã qua (ERA5), trễ khoảng 5 ngày
+RECENT_DAYS = 30   # 31 ngày gần nhất đã có trong lần lấy thường lệ
 FIELDS = "temperature_2m,relative_humidity_2m,cloud_cover,shortwave_radiation,precipitation,wind_speed_10m"
 KEYS = ("temp", "hum", "cloud", "rad", "precip", "wind")
 
@@ -41,6 +44,31 @@ class Weather:
     @staticmethod
     def _locate():
         return {"lat": config.WEATHER_LAT, "lon": config.WEATHER_LON, "name": config.WEATHER_NAME or "Nhà nấm"}
+
+    def backfill(self):
+        """Lấy bù thời tiết cho các giờ cũ có số đo cảm biến mà chưa có thời tiết. Trả số giờ đã thêm."""
+        now = time.time()
+        missing = self.store.hours_missing_weather(now - config.HISTORY_RETENTION_DAYS * 86400, now - RECENT_DAYS * 86400)
+        if not missing:
+            return 0
+        loc = self.location or self._locate()
+        day = lambda ts: time.strftime("%Y-%m-%d", time.localtime(ts))
+        try:
+            res = requests.get(ARCHIVE, timeout=60, params={
+                "latitude": loc["lat"], "longitude": loc["lon"], "hourly": FIELDS,
+                "start_date": day(missing[0]), "end_date": day(missing[-1]), "timeformat": "unixtime", "timezone": "auto",
+            })
+            res.raise_for_status()
+            rows = _hourly_rows(res.json().get("hourly") or {})
+        except (requests.RequestException, ValueError) as exc:
+            log.warning("Không lấy bù được thời tiết cũ: %s", exc)
+            return 0
+        want = set(missing)
+        rows = [r for r in rows if r["ts"] in want and r["temp"] is not None]
+        self.store.add_weather(rows)
+        if rows:
+            log.info("Lấy bù thời tiết %d giờ cũ (%s → %s) để mô hình học cả dữ liệu cũ", len(rows), day(missing[0]), day(missing[-1]))
+        return len(rows)
 
     def refresh(self):
         """Gọi định kỳ (15 phút). Lỗi mạng thì giữ dữ liệu cũ."""

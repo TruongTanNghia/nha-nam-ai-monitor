@@ -6,6 +6,7 @@ Tóm tắt:
 - Dữ liệu: cứ 15 phút lấy 1 "trạng thái" = trung bình 15 phút của nhiệt độ, độ ẩm KK, độ ẩm đất, ánh sáng,
   pH, độ mặn, tỉ lệ bật thiết bị; ghép thời tiết Open-Meteo lúc đó và lúc cần dự báo.
 - Mẫu = (trạng thái lúc τ + xu hướng 1 giờ qua, mốc h ∈ {1,2,3} giờ) -> mức thay đổi của 6 chỉ số tới lúc τ + h.
+  Học trên toàn bộ dữ liệu đã lưu; giờ đầu sau khi bật máy (chưa có xu hướng) vẫn dùng, xu hướng để trống.
 - Làm sạch: bỏ trạng thái có cảm biến ngoài khoảng vật lý hoặc đọc lỗi (nhiệt độ/độ ẩm/pH đúng 0), đoạn số liệu
   ĐỨNG YÊN (mạch ESP32 tắt/mất mạng, Firebase giữ số cũ: cả 6 cảm biến không đổi suốt 15 phút), và mẫu có thay đổi
   vượt mức vật lý hợp lý (nhảy số khi cắm lại cảm biến).
@@ -25,6 +26,7 @@ import time
 
 import numpy as np
 
+import config
 from sensors import SENSORS, fmt, is_valid, num, thresholds
 
 try:
@@ -40,6 +42,7 @@ OUT = ["temp", "hum", "cloud", "rad", "precip", "wind"]   # thời tiết lúc h
 OUT_FUT = ["temp", "hum", "rad", "precip"]                 # thời tiết lúc cần dự báo (dự báo Open-Meteo)
 TREND = ["t", "h", "GT_AMDAT", "ANHSANG"]                  # xu hướng: thay đổi trong 1 giờ qua (đang nóng lên/nguội đi...)
 TARGETS = ["t", "h", "GT_AMDAT", "ANHSANG", "GT_PH", "GT_DOMAN"]
+LIVE_BASE = {"GT_AMDAT"}   # dự báo tính từ số đo mới nhất thay cho trung bình 15 phút
 HORIZONS = (1, 2, 3)
 OUTPUTS = [(hz, k) for hz in HORIZONS for k in TARGETS]
 # Thay đổi lớn nhất hợp lý trong 1 giờ trong nhà nấm; vượt quá = lỗi cảm biến, bỏ khi học
@@ -62,8 +65,9 @@ GROUPS = {  # gộp đặc trưng thành nhóm dễ hiểu khi giải thích "y�
     "Xu hướng 1 giờ qua": [f"d_{k}" for k in TREND],
 }
 STEP = 900          # 1 trạng thái = trung bình 15 phút
-MIN_SAMPLES = 60    # ~8 giờ chạy liên tục (mỗi 15 phút cho tối đa 3 mẫu: +1, +2, +3 giờ)
-NEED_SAMPLES = 84   # thường cần chừng này mẫu mới đủ 2 lần kiểm chứng walk-forward (~10 giờ chạy liên tục)
+MIN_SAMPLES = 60    # ~7 giờ chạy liên tục (mỗi 15 phút cho tối đa 3 mẫu: +1, +2, +3 giờ)
+MAX_SAMPLES = 20000  # ~70 ngày chạy liên tục; nhiều hơn thì chỉ học phần gần nhất (học lại mỗi 15 phút trên máy yếu)
+NEED_SAMPLES = 84   # thường cần chừng này mẫu mới đủ 2 lần kiểm chứng walk-forward (~9 giờ chạy liên tục)
 MIN_TRAIN, MIN_TEST = 24, 6
 FOLDS = 5
 WEIGHTS = np.linspace(0, 1, 11)   # hệ số tin Random Forest được thử: 0; 0,1; ...; 1
@@ -75,10 +79,11 @@ METHOD = ("Random Forest (200 cây), dự báo trực tiếp mức thay đổi s
 
 
 def _features(state, prev, devices, w_now, w_fut, t_mid, hz):
-    """prev: trạng thái 1 giờ trước (để tính xu hướng)."""
+    """prev: trạng thái 1 giờ trước (để tính xu hướng); chưa có (giờ đầu sau khi bật máy) -> xu hướng để trống (NaN),
+    Random Forest (scikit-learn >= 1.4) tự xử lý ô trống nên vẫn học và dự báo được."""
     hour = time.localtime(t_mid).tm_hour + time.localtime(t_mid).tm_min / 60
     row = [state.get(k) for k in INDOOR]
-    row += [None if state.get(k) is None or prev.get(k) is None else state[k] - prev[k] for k in TREND]
+    row += [math.nan if state.get(k) is None or prev.get(k) is None else state[k] - prev[k] for k in TREND]
     row += [devices.get(k, 0) or 0 for k in DEVICES]
     row += [(w_now or {}).get(k) for k in OUT] + [(w_fut or {}).get(k) for k in OUT_FUT]
     row += [math.sin(2 * math.pi * hour / 24), math.cos(2 * math.pi * hour / 24), hz]
@@ -117,8 +122,10 @@ class RFAnalyzer:
 
     # ------------------------------------------------------------------ dữ liệu
     def _dataset(self, now):
-        buckets = self.store.bucket_readings(now - 30 * 86400, size=STEP)
-        weather = self.store.weather_between(now - 31 * 86400, now)
+        # học trên TOÀN BỘ dữ liệu đã lưu (HISTORY_RETENTION_DAYS); thời tiết các giờ cũ lấy từ kho Open-Meteo
+        since = now - config.HISTORY_RETENTION_DAYS * 86400
+        buckets = self.store.bucket_readings(since, size=STEP)
+        weather = self.store.weather_between(since - 86400, now)
         w_at = lambda ts: weather.get(int(ts // 3600 * 3600))
         X, Y, T, HZ, skipped = [], [], [], [], 0
         bad = {b for b, r in buckets.items() if not _clean(r)}
@@ -133,9 +140,8 @@ class RFAnalyzer:
             if b in bad:
                 continue
             r, t_mid = buckets[b], b + STEP / 2
-            prev = buckets.get(b - 3600)
-            if prev is None or b - 3600 in bad:
-                continue  # chưa có số liệu 1 giờ trước để tính xu hướng
+            # giờ đầu sau khi bật máy / mạch chạy lại: chưa có trạng thái 1 giờ trước -> xu hướng để trống
+            prev = {} if b - 3600 in bad else (buckets.get(b - 3600) or {})
             for hz in HORIZONS:
                 f = buckets.get(b + hz * 3600)
                 if f is None:
@@ -154,6 +160,8 @@ class RFAnalyzer:
                     Y.append(dy)
                     T.append(b)
                     HZ.append(hz)
+        if len(X) > MAX_SAMPLES:  # máy yếu: chỉ học các mẫu gần nhất (dữ liệu xếp theo thời gian)
+            X, Y, T, HZ = X[-MAX_SAMPLES:], Y[-MAX_SAMPLES:], T[-MAX_SAMPLES:], HZ[-MAX_SAMPLES:]
         return (np.array(X, dtype=float), np.array(Y, dtype=float), np.array(T, dtype=float),
                 np.array(HZ, dtype=int), skipped + len(bad))
 
@@ -184,12 +192,12 @@ class RFAnalyzer:
         folds = self._folds(T, HZ) if len(X) >= MIN_SAMPLES else []
         if len(folds) < 2:
             self.model, self.eval = None, {}
-            # chạy liền S giờ cho khoảng 12·S − 36 mẫu (cần trạng thái 1 giờ trước và số đo 1–3 giờ sau)
-            hours = max(1, math.ceil(max(0, NEED_SAMPLES - len(X)) / 12 + max(0.0, 3 - self.streak_hours)))
+            # chạy liền S giờ cho khoảng 12·S − 24 mẫu (mỗi mẫu cần số đo thật 1–3 giờ sau)
+            hours = max(1, math.ceil(max(0, NEED_SAMPLES - len(X)) / 12 + max(0.0, 2 - self.streak_hours)))
             self.info.update(trained=False, validated=False, evaluation=[], importance=[], need=NEED_SAMPLES, note=(
                 f"Đang học: {len(X)}/{NEED_SAMPLES} mẫu. Dự báo đầu tiên sau khoảng {hours} giờ nữa nếu mạch ESP32 "
-                f"và máy tính chạy liên tục (đang chạy liền {self.streak_hours:.1f} giờ; máy chủ mới cần khoảng 10 giờ liền). "
-                "Mỗi lần tắt máy hoặc mạch mất điện, giờ đầu sau khi bật lại chưa tính được"
+                f"và máy tính chạy liên tục (đang chạy liền {self.streak_hours:.1f} giờ; máy chủ mới cần khoảng 9 giờ liền). "
+                "AI học trên toàn bộ dữ liệu đã lưu, chỉ bỏ các đoạn mạch tắt (số đứng yên)"
                 + (f"; đã loại {skipped} đoạn cảm biến lỗi/số liệu đứng yên" if skipped else "")
                 + ". Chưa dự báo khi chưa kiểm chứng được."))
             return
@@ -272,12 +280,14 @@ class RFAnalyzer:
             for hz in HORIZONS:
                 x = _features(state, prev, devices, self.weather.at(t_mid), self.weather.at(t_mid + hz * 3600), t_mid, hz)
                 if x is None:
-                    break  # máy chủ chưa chạy đủ 1 giờ (chưa có xu hướng) hoặc thiếu thời tiết
+                    break  # thiếu thời tiết hoặc cảm biến chưa có số đo
                 dy = dict(zip(TARGETS, self.model.predict(np.array([x], dtype=float))[0]))
                 row = {"hours": hz, "range": {}, "basis": {}}
                 for k in TARGETS:
-                    # gốc = trung bình 15 phút (giống lúc học); cảm biến nhảy số (độ mặn, ánh sáng) đỡ lệch hơn 1 lần đo
-                    base = state[k] if is_valid(k, state[k]) else (live[k] if is_valid(k, live[k]) else None)
+                    # gốc = trung bình 15 phút (giống lúc học): cảm biến nhảy số (độ mặn, ánh sáng) đỡ lệch hơn 1 lần đo.
+                    # Độ ẩm đất ít nhiễu nhưng đổi bậc khi bơm bật/tắt -> số đo mới nhất bám kịp hơn trung bình
+                    first, second = (live, state) if k in LIVE_BASE else (state, live)
+                    base = first[k] if is_valid(k, first[k]) else (second[k] if is_valid(k, second[k]) else None)
                     e = self.eval.get((hz, k))
                     if base is None or e is None or (k == "GT_AMDAT" and (live[k] or 0) <= 0.5):
                         row[k] = None   # độ ẩm đất 0% = cảm biến lỗi -> không dự báo

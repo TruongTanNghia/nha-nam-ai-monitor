@@ -174,6 +174,16 @@ class Storage:
                 [(r["ts"], r["temp"], r["hum"], r["cloud"], r["rad"], r["precip"], r["wind"]) for r in rows],
             )
 
+    def hours_missing_weather(self, start_ts, end_ts):
+        """Các giờ có số đo cảm biến nhưng chưa có thời tiết (để lấy bù từ kho Open-Meteo)."""
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT DISTINCT CAST(ts / 3600 AS INTEGER) * 3600 AS h FROM readings WHERE ts >= ? AND ts < ?
+                   AND CAST(ts / 3600 AS INTEGER) * 3600 NOT IN (SELECT ts FROM weather_hourly) ORDER BY h""",
+                (start_ts, end_ts),
+            ).fetchall()
+        return [r[0] for r in rows]
+
     def weather_between(self, start_ts, end_ts):
         with self.lock:
             rows = self.conn.execute(
