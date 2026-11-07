@@ -62,7 +62,8 @@ GROUPS = {  # gộp đặc trưng thành nhóm dễ hiểu khi giải thích "y�
     "Xu hướng 1 giờ qua": [f"d_{k}" for k in TREND],
 }
 STEP = 900          # 1 trạng thái = trung bình 15 phút
-MIN_SAMPLES = 60    # ~7 giờ chạy liên tục (mỗi 15 phút cho tối đa 3 mẫu: +1, +2, +3 giờ)
+MIN_SAMPLES = 60    # ~8 giờ chạy liên tục (mỗi 15 phút cho tối đa 3 mẫu: +1, +2, +3 giờ)
+NEED_SAMPLES = 84   # thường cần chừng này mẫu mới đủ 2 lần kiểm chứng walk-forward (~10 giờ chạy liên tục)
 MIN_TRAIN, MIN_TEST = 24, 6
 FOLDS = 5
 WEIGHTS = np.linspace(0, 1, 11)   # hệ số tin Random Forest được thử: 0; 0,1; ...; 1
@@ -112,6 +113,7 @@ class RFAnalyzer:
                      "evaluation": [], "importance": [], "note": "Đang chờ dữ liệu cảm biến + thời tiết"}
         self.result = None
         self.last_train = 0
+        self.streak_hours = 0.0
 
     # ------------------------------------------------------------------ dữ liệu
     def _dataset(self, now):
@@ -120,6 +122,13 @@ class RFAnalyzer:
         w_at = lambda ts: weather.get(int(ts // 3600 * 3600))
         X, Y, T, HZ, skipped = [], [], [], [], 0
         bad = {b for b, r in buckets.items() if not _clean(r)}
+        # số giờ mạch + máy chủ đang chạy liền tới giờ (để ước tính bao lâu nữa có dự báo)
+        b, streak = int(now // STEP * STEP) - STEP, 0
+        if b not in buckets:
+            b -= STEP  # khoảng 15 phút vừa xong có thể chưa đủ số đo
+        while b in buckets and b not in bad:
+            streak, b = streak + 1, b - STEP
+        self.streak_hours = streak * STEP / 3600
         for b in sorted(buckets):
             if b in bad:
                 continue
@@ -175,12 +184,13 @@ class RFAnalyzer:
         folds = self._folds(T, HZ) if len(X) >= MIN_SAMPLES else []
         if len(folds) < 2:
             self.model, self.eval = None, {}
-            need = max(0, MIN_SAMPLES - len(X))
-            self.info.update(trained=False, validated=False, evaluation=[], importance=[], note=(
-                f"Đang thu thập: {len(X)}/{MIN_SAMPLES} mẫu"
-                + (f" (còn khoảng {max(1, round(need / 12))} giờ máy chủ chạy liên tục)" if need
-                   else " — cần thêm dữ liệu theo thời gian để kiểm chứng")
-                + (f"; đã loại {skipped} đoạn cảm biến lỗi/nhảy số" if skipped else "")
+            # chạy liền S giờ cho khoảng 12·S − 36 mẫu (cần trạng thái 1 giờ trước và số đo 1–3 giờ sau)
+            hours = max(1, math.ceil(max(0, NEED_SAMPLES - len(X)) / 12 + max(0.0, 3 - self.streak_hours)))
+            self.info.update(trained=False, validated=False, evaluation=[], importance=[], need=NEED_SAMPLES, note=(
+                f"Đang học: {len(X)}/{NEED_SAMPLES} mẫu. Dự báo đầu tiên sau khoảng {hours} giờ nữa nếu mạch ESP32 "
+                f"và máy tính chạy liên tục (đang chạy liền {self.streak_hours:.1f} giờ; máy chủ mới cần khoảng 10 giờ liền). "
+                "Mỗi lần tắt máy hoặc mạch mất điện, giờ đầu sau khi bật lại chưa tính được"
+                + (f"; đã loại {skipped} đoạn cảm biến lỗi/số liệu đứng yên" if skipped else "")
                 + ". Chưa dự báo khi chưa kiểm chứng được."))
             return
 

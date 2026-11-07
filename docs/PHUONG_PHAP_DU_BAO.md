@@ -58,7 +58,7 @@ Số đoạn bị loại được hiển thị trên web.
   - Skill (%) = (1 − MAE<sub>mô hình</sub> / MAE<sub>giữ nguyên</sub>) × 100. Dương nghĩa là mô hình tốt hơn.
 - **Quy tắc hiển thị:** với mỗi cặp (chỉ số, mốc giờ), nếu Random Forest không làm sai số nhỏ hơn (w = 0 hoặc skill ≤ 0) thì dự báo = **giữ nguyên**: ô màu xám, ghi “giữ nguyên” và **không dùng để đưa gợi ý**.
 - **Đối chiếu sau khi dự báo (dữ liệu thật):** mỗi lần dự báo được lưu lại. Tới giờ được dự báo, máy chủ so với trung bình số đo ±7,5 phút. Ô có ít hơn 8 lần so thì ghi “đang đo”, vì 1 lần đo lỗi có thể làm lệch cả ô. Bảng này chỉ tính các dự báo từ bản sửa này trở đi; dự báo của bản cũ (học cả số liệu đứng yên) vẫn nằm trong cơ sở dữ liệu nhưng không tính.
-- **Chưa kiểm chứng thì chưa dự báo:** cần tối thiểu 60 mẫu (khoảng 7–10 giờ máy chủ chạy liên tục) và ít nhất 2 lần kiểm chứng. Trước đó web ghi “Đang thu thập dữ liệu để kiểm chứng” kèm số giờ còn thiếu. Trong lúc đó web vẫn báo các chỉ số **đang** ngoài ngưỡng.
+- **Chưa kiểm chứng thì chưa dự báo:** cần ít nhất 60 mẫu và 2 lần kiểm chứng, thường là khoảng 84 mẫu. Máy chủ mới cần khoảng **10 giờ mạch ESP32 và máy tính chạy liền** (chạy liền S giờ được khoảng 12·S − 36 mẫu, vì mỗi mẫu cần trạng thái 1 giờ trước và số đo 1–3 giờ sau). Mỗi lần tắt máy hoặc mạch mất điện, giờ đầu sau khi bật lại chưa tính được. Trước đó web ghi “AI đang học” kèm số giờ còn thiếu. Trong lúc đó web vẫn báo các chỉ số **đang** ngoài ngưỡng.
 
 ## 7. Khoảng sai số
 Mỗi ô dự báo kèm **±**: phân vị 80% của sai số tuyệt đối đo được khi kiểm chứng. Nghĩa là khoảng 80% lần dự báo trước đây có sai số không vượt quá mức này.
