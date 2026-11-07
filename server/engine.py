@@ -163,7 +163,7 @@ class Engine:
                     self.last_weather = now
                     if self.weather.refresh() and self.rf.result is None:
                         self.last_rf = 0  # có thời tiết lần đầu -> phân tích ngay
-                if now - self.last_rf >= RF_EVERY and self.latest_data:
+                if now - self.last_rf >= RF_EVERY and self.latest_data and self.esp_online is not False:
                     self.last_rf = now
                     with self.lock:
                         rows, data = list(self.recent), dict(self.latest_data)
@@ -198,12 +198,14 @@ class Engine:
         values = {k: num(data.get(k)) for k in SENSOR_KEYS}
         values.update({k: 1 if num(data.get(k)) == 1 else 0 for k in DEVICE_KEYS})
         values["MODE"] = MODE_AUTO if num(data.get("MODE")) == MODE_AUTO else 0
-        self.store.add_reading(now, values)
         prev = self.latest_values
         if prev is not None and any(prev.get(k) != values.get(k) for k in SENSOR_KEYS):
             self.hw_last_change = now
         self._track_esp_restart(data, now)
         self._check_esp_link(data, now)
+        # Mạch tắt / mất mạng: Firebase giữ nguyên số cũ -> KHÔNG lưu (số đứng yên làm sai dữ liệu gốc và mô hình dự báo)
+        if self.esp_online is not False:
+            self.store.add_reading(now, values)
 
         with self.lock:
             self.latest_data, self.latest_values = data, values
@@ -313,7 +315,9 @@ class Engine:
             # Quyết định theo lúc ESP_TS thay đổi (đồng hồ máy chủ) -> không bị lệch giờ giữa máy và Firebase.
             # Lần đọc đầu chưa biết: coi như vừa thấy, sau 60 giây không đổi mới là mất kết nối.
             if esp_ts != self.esp_ts_prev:
-                self.esp_ts_prev, self.esp_ts_seen = esp_ts, now
+                # lần đọc đầu mà nhịp tim đã cũ hơn 5 phút (theo giờ Firebase) -> mạch đã tắt từ trước, không chờ 60 giây
+                stale = self.esp_ts_prev is None and now - esp_ts / 1000 > 300
+                self.esp_ts_prev, self.esp_ts_seen = esp_ts, (esp_ts / 1000 if stale else now)
             online = now - self.esp_ts_seen <= ESP_OFFLINE_SEC
             last_seen = esp_ts / 1000  # giờ Firebase của lần gửi cuối, chỉ để hiển thị
         elif self.hw_last_change:  # firmware cũ: dựa vào số liệu còn thay đổi

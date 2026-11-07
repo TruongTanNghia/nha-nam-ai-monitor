@@ -11,6 +11,8 @@ SENSORS = {
     "GT_PH": {"name": "pH", "unit": "", "phys": (0, 14), "jump": 2, "digits": 2},
 }
 SENSOR_KEYS = list(SENSORS)
+# Đúng 0 = cảm biến đọc lỗi (DHT11 lỗi / ESP32 vừa khởi động chưa kịp đo, đầu pH hở mạch), không phải số đo thật
+ZERO_FAULT = ("t", "h", "GT_PH")
 
 DEVICES = {
     "BOM": "Máy bơm",
@@ -77,6 +79,8 @@ def fmt(key, value):
 
 def is_valid(key, value):
     if value is None:
+        return False
+    if value == 0 and key in ZERO_FAULT:
         return False
     lo, hi = SENSORS[key]["phys"]
     return lo <= value <= hi

@@ -28,7 +28,7 @@ def label(k):
 
 
 HEADERS = (["NGÀY DỰ BÁO", "GIỜ DỰ BÁO", "DỰ BÁO CHO LÚC", "SAU (GIỜ)"]
-           + [f"{label(k)} {col}" for k in TARGETS for col in ("lúc dự báo", "RF dự báo", "thực tế")])
+           + [f"{label(k)} {col}" for k in TARGETS for col in ("lúc dự báo", "AI dự báo", "thực tế")])
 
 
 def _round(k, v):
@@ -84,7 +84,7 @@ class ForecastLog:
     @staticmethod
     def score(groups):
         """Sai số trung bình RF so với "giữ nguyên" trên các dự báo đã có kết quả."""
-        err = {(h, k): ([], []) for h in HORIZONS for k in TARGETS}
+        err = {(h, k): ([], [], []) for h in HORIZONS for k in TARGETS}
         for g in groups:
             for k, v in g["vals"].items():
                 act = (g["actual"] or {}).get(k)
@@ -92,14 +92,15 @@ class ForecastLog:
                     continue
                 err[(g["hours"], k)][0].append(abs(v["predicted"] - act))
                 err[(g["hours"], k)][1].append(abs(v["now_value"] - act))
+                err[(g["hours"], k)][2].append(v.get("basis") == "persist")
         rows = []
-        for (h, k), (em, eb) in err.items():
+        for (h, k), (em, eb, persist) in err.items():
             if not em:
                 continue
             mae, mae_b = sum(em) / len(em), sum(eb) / len(eb)
             skill = max(-100.0, min(100.0, (1 - mae / mae_b) * 100)) if mae_b > 1e-9 else (0.0 if mae < 1e-9 else -100.0)
             rows.append({"hours": h, "key": k, "n": len(em), "mae": round(mae, 3), "mae_base": round(mae_b, 3),
-                         "skill": round(skill)})
+                         "skill": round(skill), "persist": all(persist)})
         return rows
 
     def refresh_summary(self, now=None):

@@ -71,10 +71,13 @@ def build(engine, days=30):
         ["Khoảng thời gian", f"{_fmt(since, '%d/%m/%Y')} → {_fmt(now, '%d/%m/%Y')} ({days} ngày)"],
         ["Dữ liệu gốc", f"{len(raw)} phút có số đo. Cảm biến ESP32 đọc qua Firebase 5 giây/lần (khi máy chủ chạy) và "
                         "Google Sheet 1 phút/lần (24/7); mỗi dòng = trung bình các lần đo trong 1 phút. "
-                        "Thiết bị: tỉ lệ thời gian bật trong phút (1 = bật cả phút)."],
-        ["Dự báo & thực tế", f"{len(groups)} lần dự báo ({len(done)} đã có kết quả). Random Forest dự báo 15 phút/lần "
-                             "cho 1, 2, 3 giờ tới; 'thực tế' = trung bình số đo ±7,5 phút quanh giờ được dự báo."],
-        ["Tổng hợp sai số", "Sai số tuyệt đối trung bình của Random Forest so với cách 'giữ nguyên giá trị lúc dự báo' "
+                        "Thiết bị: tỉ lệ thời gian bật trong phút (1 = bật cả phút). Lúc mạch ESP32 tắt/mất mạng "
+                        "không ghi (không có số đo thật); ô trống = cảm biến đọc lỗi (báo đúng 0)."],
+        ["Dự báo & thực tế", f"{len(groups)} lần dự báo ({len(done)} đã có kết quả). Dự báo 15 phút/lần "
+                             "cho 1, 2, 3 giờ tới = trung bình 15 phút hiện tại + w × mức thay đổi Random Forest dự báo "
+                             "(w chọn bằng kiểm chứng walk-forward; w = 0 là giữ nguyên); 'thực tế' = trung bình số đo "
+                             "±7,5 phút quanh giờ được dự báo."],
+        ["Tổng hợp sai số", "Sai số tuyệt đối trung bình của dự báo so với cách 'giữ nguyên giá trị lúc dự báo' "
                             "(mốc chuẩn persistence), trên dữ liệu thật sau khi dự báo; kèm kết quả kiểm chứng "
                             "walk-forward lúc huấn luyện."],
         ["Thời tiết", f"Open-Meteo theo giờ tại {loc.get('name')} ({loc.get('lat')}, {loc.get('lon')})."],
@@ -92,15 +95,15 @@ def build(engine, days=30):
 
     # 4) Tổng hợp sai số
     rows = [[f"+{s['hours']} giờ", label(s["key"]), s["n"], s["mae"], s["mae_base"], s["skill"],
-             "Có" if s["skill"] > 0 else "Chưa"]
+             "Giữ nguyên" if s["persist"] else "Có"]
             for s in sorted(ForecastLog.score(done), key=lambda s: (TARGETS.index(s["key"]), s["hours"]))]
     rows += [[""] * 7, ["KIỂM CHỨNG WALK-FORWARD LÚC HUẤN LUYỆN (dữ liệu mô hình chưa thấy)"] + [""] * 6]
     rows += [[f"+{e['hours']} giờ", label(e["key"]), e["n"], e["mae"], e["mae_base"], e["skill"],
-              "Có" if e["use_rf"] else "Chưa"]
+              f"Có (w = {e.get('w', 1)})" if e["use_rf"] else "Giữ nguyên"]
              for e in sorted(engine.rf.info.get("evaluation") or [], key=lambda e: (TARGETS.index(e["key"]), e["hours"]))]
     _sheet(wb, "Tổng hợp sai số",
-           ["Dự báo trước", "Chỉ số", "Số lần so", "Sai số TB Random Forest", "Sai số TB giữ nguyên",
-            "RF tốt hơn (%)", "RF tốt hơn?"], rows, [13, 26, 11, 16, 16, 13, 11])
+           ["Dự báo trước", "Chỉ số", "Số lần so", "Sai số TB dự báo", "Sai số TB giữ nguyên",
+            "Dự báo tốt hơn (%)", "Dùng Random Forest?"], rows, [13, 26, 11, 16, 16, 13, 11])
 
     # 5) Thời tiết ngoài trời
     weather = store.weather_between(since, now)

@@ -4,9 +4,17 @@ import threading
 import time
 
 import config
-from sensors import DEVICE_KEYS, SENSOR_KEYS
+from sensors import DEVICE_KEYS, SENSOR_KEYS, ZERO_FAULT
 
 READING_COLS = SENSOR_KEYS + DEVICE_KEYS + ["MODE"]
+FORECAST_VER = 2  # bản 1: mô hình cũ học cả số liệu đứng yên lúc mạch tắt -> không tính vào bảng đối chiếu
+# Cả 6 cảm biến không đổi chút nào trong cả khoảng = số liệu đứng yên (mạch tắt/mất mạng, Firebase giữ số cũ)
+UNIQ = "COUNT(DISTINCT " + " || '|' || ".join(f'IFNULL("{k}", \'\')' for k in SENSOR_KEYS) + ")"
+
+
+def _avg(col):
+    """Trung bình cột; cảm biến báo đúng 0 do đọc lỗi (DHT11, pH) không tính vào."""
+    return f'AVG(NULLIF("{col}", 0))' if col in ZERO_FAULT else f'AVG("{col}")'
 
 RANGES = {  # giây
     "15m": 15 * 60,
@@ -55,6 +63,8 @@ class Storage:
                 );
                 """
             )
+            if "ver" not in {r[1] for r in self.conn.execute("PRAGMA table_info(forecasts)")}:
+                self.conn.execute("ALTER TABLE forecasts ADD COLUMN ver INTEGER DEFAULT 1")
 
     # ---------- readings ----------
     def add_reading(self, ts, values):
@@ -105,11 +115,11 @@ class Storage:
     def bucket_readings(self, since_ts, size=900, min_samples=10):
         """Trung bình từng khoảng `size` giây (mặc định 15 phút) của cảm biến + tỉ lệ bật thiết bị.
         Trả dict: thời điểm đầu khoảng -> bản ghi trung bình (bỏ khoảng có ít hơn min_samples lần đọc)."""
-        sensors = ", ".join(f'AVG("{k}") AS "{k}"' for k in SENSOR_KEYS)
+        sensors = ", ".join(f'{_avg(k)} AS "{k}"' for k in SENSOR_KEYS)
         devices = ", ".join(f'AVG("{k}") AS "{k}"' for k in DEVICE_KEYS)
         with self.lock:
             rows = self.conn.execute(
-                f"""SELECT CAST(ts / ? AS INTEGER) * ? AS b, COUNT(*) AS n, {sensors}, {devices}
+                f"""SELECT CAST(ts / ? AS INTEGER) * ? AS b, COUNT(*) AS n, {UNIQ} AS uniq, {sensors}, {devices}
                     FROM readings WHERE ts >= ? GROUP BY b HAVING n >= ? ORDER BY b""",
                 (size, size, since_ts, min_samples),
             ).fetchall()
@@ -117,7 +127,7 @@ class Storage:
 
     def minute_readings(self, since_ts):
         """Trung bình từng phút (dữ liệu gốc để xuất file) + số lần đo trong phút."""
-        avgs = ", ".join(f'AVG("{c}") AS "{c}"' for c in READING_COLS)
+        avgs = ", ".join(f'{_avg(c)} AS "{c}"' for c in READING_COLS)
         with self.lock:
             rows = self.conn.execute(
                 f"""SELECT CAST(ts / 60 AS INTEGER) * 60 AS ts, COUNT(*) AS n, {avgs}
@@ -127,13 +137,15 @@ class Storage:
         return [dict(r) for r in rows]
 
     def mean_between(self, start_ts, end_ts):
-        """Trung bình cảm biến trong [start, end]; None nếu không có số đo."""
-        avgs = ", ".join(f'AVG("{k}") AS "{k}"' for k in SENSOR_KEYS)
+        """Trung bình cảm biến trong [start, end]; None nếu không có số đo hoặc số liệu đứng yên (mạch tắt)."""
+        avgs = ", ".join(f'{_avg(k)} AS "{k}"' for k in SENSOR_KEYS)
         with self.lock:
             row = self.conn.execute(
-                f"SELECT COUNT(*) AS n, {avgs} FROM readings WHERE ts >= ? AND ts <= ?", (start_ts, end_ts)
+                f"SELECT COUNT(*) AS n, {UNIQ} AS uniq, {avgs} FROM readings WHERE ts >= ? AND ts <= ?", (start_ts, end_ts)
             ).fetchone()
-        return dict(row) if row["n"] else None
+        if not row["n"] or (row["n"] >= 10 and row["uniq"] == 1):
+            return None
+        return dict(row)
 
     def add_sheet_readings(self, rows):
         """Bản ghi từ Google Sheet (1 phút/lần): chỉ thêm vào những phút máy chủ chưa có số liệu. Trả số dòng thêm."""
@@ -172,15 +184,16 @@ class Storage:
         """rows: (made_ts, hours, key, now_value, predicted, basis). Mỗi khung 15 phút chỉ giữ lần dự báo đầu tiên."""
         with self.lock, self.conn:
             self.conn.executemany(
-                """INSERT OR IGNORE INTO forecasts (made_bucket, hours, key, made_ts, target_ts, now_value, predicted, basis)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                [(int(m // 900) * 900, h, k, m, m + h * 3600, nv, p, b) for m, h, k, nv, p, b in rows],
+                """INSERT OR IGNORE INTO forecasts (made_bucket, hours, key, made_ts, target_ts, now_value, predicted, basis, ver)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                [(int(m // 900) * 900, h, k, m, m + h * 3600, nv, p, b, FORECAST_VER) for m, h, k, nv, p, b in rows],
             )
 
     def forecasts_between(self, start_ts, end_ts):
         with self.lock:
             rows = self.conn.execute(
-                "SELECT * FROM forecasts WHERE made_ts >= ? AND made_ts <= ? ORDER BY made_ts, hours", (start_ts, end_ts)
+                "SELECT * FROM forecasts WHERE made_ts >= ? AND made_ts <= ? AND ver >= ? ORDER BY made_ts, hours",
+                (start_ts, end_ts, FORECAST_VER)
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -189,10 +202,10 @@ class Storage:
         with self.lock:
             rows = self.conn.execute(
                 """SELECT f.* FROM forecasts f JOIN (
-                       SELECT DISTINCT made_bucket, hours FROM forecasts WHERE sent = 0 AND target_ts <= ?
+                       SELECT DISTINCT made_bucket, hours FROM forecasts WHERE sent = 0 AND target_ts <= ? AND ver >= ?
                        ORDER BY made_bucket, hours LIMIT ?) g
                    ON f.made_bucket = g.made_bucket AND f.hours = g.hours ORDER BY f.made_ts, f.hours""",
-                (done_before_ts, limit),
+                (done_before_ts, FORECAST_VER, limit),
             ).fetchall()
         return [dict(r) for r in rows]
 
