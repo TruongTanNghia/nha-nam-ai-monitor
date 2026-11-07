@@ -4,6 +4,10 @@ Thiết bị bật/tắt theo NGƯỠNG (firmware ESP32). Random Forest + thời
 """
 import datetime as dt
 import logging
+import os
+import shutil
+import sqlite3
+import tempfile
 import threading
 import time
 from collections import deque
@@ -39,6 +43,8 @@ ESP_OFFLINE_SEC = 60       # nhịp tim ESP_TS đứng yên 60 giây -> coi là 
 ESP_STALE_SEC = 300        # firmware cũ (không có ESP_TS): số liệu đứng yên 5 phút
 WEATHER_EVERY = 900        # cập nhật thời tiết 15 phút/lần
 RF_EVERY = 120             # dự đoán lại 2 phút/lần (huấn luyện lại mỗi giờ) để theo kịp khi cảm biến đổi mạnh
+DISK_EVERY = 600           # kiểm tra ổ đĩa 10 phút/lần
+DISK_LOW_MB = 500          # còn dưới 500 MB -> báo Zalo (SQLite/Windows hết chỗ thì không ghi được số liệu)
 SHEET_EVERY = 1800         # lấy Google Sheet (ESP32 ghi 1 phút/lần) 30 phút/lần để lấp dữ liệu lúc máy tính tắt
 
 
@@ -76,6 +82,8 @@ class Engine:
         self.sheet = SheetSync(self.store)
         self.forecasts = ForecastLog(self.store)
         self.csv = CsvFiles(self.store, self.forecasts)
+        self.disk = {"db_free_mb": None, "tmp_free_mb": None, "db_size_mb": None, "write_error": None, "low": False}
+        self.last_disk = 0
         self.zalo = ZaloBot()
         self.outbox = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outbox")
         self.lock = threading.RLock()
@@ -178,6 +186,12 @@ class Engine:
                 self.csv.update(now)
             except Exception:
                 log.exception("Lỗi ghi file CSV")
+            try:
+                if now - self.last_disk >= DISK_EVERY:
+                    self.last_disk = now
+                    self._check_disk()
+            except Exception:
+                log.exception("Lỗi kiểm tra ổ đĩa")
             time.sleep(20)
 
     # ------------------------------------------------------------------- tick
@@ -205,7 +219,16 @@ class Engine:
         self._check_esp_link(data, now)
         # Mạch tắt / mất mạng: Firebase giữ nguyên số cũ -> KHÔNG lưu (số đứng yên làm sai dữ liệu gốc và mô hình dự báo)
         if self.esp_online is not False:
-            self.store.add_reading(now, values)
+            try:
+                self.store.add_reading(now, values)
+                if self.disk["write_error"]:
+                    self.disk["write_error"] = None
+                    self.last_disk = 0  # kiểm tra lại ổ đĩa ngay
+            except sqlite3.Error as exc:  # vd ổ đĩa đầy: vẫn hiện số đo trực tiếp, cảnh báo, không dừng vòng lặp
+                if not self.disk["write_error"]:
+                    log.error("Không lưu được số liệu: %s", exc)
+                    self.last_disk = 0
+                self.disk["write_error"] = str(exc)
 
         with self.lock:
             self.latest_data, self.latest_values = data, values
@@ -306,6 +329,28 @@ class Engine:
             shown.append(f"… và {len(lines) - 15} lần bật/tắt khác")
         title = "🔧 THIẾT BỊ BẬT/TẮT" + (f" ({len(lines)} lần)" if len(lines) > 1 else "")
         self.notify(title + "\n" + "\n".join(shown), important=True)
+
+    # ------------------------------------------------- ổ đĩa
+    def _check_disk(self):
+        """Dung lượng trống của ổ chứa dữ liệu và ổ chứa file tạm (Temp). Sắp đầy / không ghi được -> báo Zalo 1 lần."""
+        free = lambda p: round(shutil.disk_usage(p).free / 2**20)
+        db = config.DB_PATH
+        size = sum(f.stat().st_size for f in db.parent.glob(db.name + "*") if f.is_file())
+        self.disk.update(db_free_mb=free(db.parent), tmp_free_mb=free(tempfile.gettempdir()), db_size_mb=round(size / 2**20))
+        low_mb = min(self.disk["db_free_mb"], self.disk["tmp_free_mb"])
+        low = low_mb < DISK_LOW_MB or bool(self.disk["write_error"])
+        if low:
+            log.warning("Ổ đĩa sắp đầy: ổ dữ liệu còn %s MB, ổ file tạm còn %s MB%s", self.disk["db_free_mb"],
+                        self.disk["tmp_free_mb"], " — KHÔNG LƯU ĐƯỢC SỐ LIỆU" if self.disk["write_error"] else "")
+        if low and not self.disk["low"]:
+            tmp_drive = os.path.splitdrive(tempfile.gettempdir())[0] or "Temp"
+            self.notify(f"💾 Ổ ĐĨA MÁY CHỦ AI SẮP ĐẦY\n"
+                        f"Ổ chứa dữ liệu ({db.drive or db.anchor}) còn {self.disk['db_free_mb']} MB, "
+                        f"ổ chứa file tạm ({tmp_drive}) còn {self.disk['tmp_free_mb']} MB."
+                        + (f"\nĐang không lưu được số liệu: {self.disk['write_error']}." if self.disk["write_error"] else "")
+                        + "\nDọn bớt: chuột phải ổ đĩa → Properties → Disk Cleanup, dọn Thùng rác.", priority="high")
+        # đã báo thì phải trống lại trên 1 GB mới báo lần sau (không báo đi báo lại)
+        self.disk["low"] = low or (self.disk["low"] and low_mb < DISK_LOW_MB * 2)
 
     # ------------------------------------------------- mạch ESP32 tắt / mở lại
     def _check_esp_link(self, data, now):
@@ -699,6 +744,7 @@ class Engine:
                 "sheet": self.sheet.status,
                 "forecast_check": self.forecasts.status(),
                 "csv": self.csv.status,
+                "disk": self.disk,
                 "esp_online": self.esp_online,
                 "hardware": {
                     "last_change_ts": self.hw_last_change,

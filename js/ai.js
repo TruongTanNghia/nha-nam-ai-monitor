@@ -127,7 +127,13 @@ export function renderAnalysis() {
     banner.hidden = false;
     setHTML(banner, `${icon("server-off")}<div><b>Chưa kết nối Máy chủ AI.</b> Phân tích nâng cao, cảnh báo Zalo và tự động 24/7 cần chạy <code>python server/app.py</code>. Đang hiển thị đánh giá cơ bản trên trình duyệt.</div>`);
   } else {
-    banner.hidden = true;
+    // Ổ đĩa máy chủ sắp đầy / không lưu được số liệu -> nói rõ cách xử lý (biểu đồ, AI cần ổ đĩa còn chỗ)
+    const d = backend.snapshot?.disk;
+    banner.hidden = !(d?.low || d?.write_error);
+    if (!banner.hidden) setHTML(banner, `${icon("hard-drive")}<div><b>Ổ đĩa máy chạy máy chủ AI sắp đầy</b>`
+      + ` (ổ dữ liệu còn ${d.db_free_mb ?? "?"} MB, ổ file tạm còn ${d.tmp_free_mb ?? "?"} MB).`
+      + (d.write_error ? ` <b>Đang không lưu được số liệu.</b>` : "")
+      + ` Dọn bớt: chuột phải ổ đĩa → Properties → Disk Cleanup, dọn Thùng rác.</div>`);
   }
 
   setHTML($("#overviewFindings"), !backend.online
