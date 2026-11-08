@@ -12,12 +12,13 @@ Tóm tắt:
   vượt mức vật lý hợp lý (nhảy số khi cắm lại cảm biến).
 - Mô hình: MỘT RandomForestRegressor, mốc giờ h là một biến đầu vào, dự báo TRỰC TIẾP từng mốc
   (không lặp từng bước nên sai số không cộng dồn).
-- Dự báo = trung bình 15 phút hiện tại + w × (mức thay đổi Random Forest dự báo). Hệ số tin cậy w ∈ [0, 1] chọn riêng
-  cho từng chỉ số × mốc giờ: w = 0 là "giữ nguyên" (persistence), w = 1 là tin hẳn Random Forest.
+- Dự báo = trung bình 15 phút hiện tại + a × (thay đổi Random Forest dự báo) + b × (thay đổi hồi quy tuyến tính Ridge
+  dự báo), a + b ≤ 1, chọn riêng cho từng chỉ số × mốc giờ. a = b = 0 là "giữ nguyên" (persistence). Ridge ít tham
+  số nên dùng được khi dữ liệu còn ít; Random Forest bắt được quan hệ phi tuyến khi dữ liệu nhiều.
 - Kiểm chứng: walk-forward theo thời gian — mỗi lần thử trên 1 đoạn thời gian sau, chỉ học các mẫu mà kết quả
-  đã biết TRƯỚC khi đoạn thử bắt đầu (không rò rỉ dữ liệu). Hệ số w của mỗi đoạn thử cũng chỉ được chọn từ các
+  đã biết TRƯỚC khi đoạn thử bắt đầu (không rò rỉ dữ liệu). Hệ số a, b của mỗi đoạn thử cũng chỉ được chọn từ các
   đoạn TRƯỚC nó, nên sai số báo cáo là sai số thật trên dữ liệu chưa thấy. So với mốc chuẩn "giữ nguyên".
-  Ô nào w = 0 (Random Forest chưa giúp được) thì dự báo = giữ nguyên, ghi rõ và không dùng để đưa gợi ý.
+  Ô nào a = b = 0 (mô hình chưa giúp được) thì dự báo = giữ nguyên, ghi rõ và không dùng để đưa gợi ý.
 - Khoảng sai số: phân vị 80% của sai số tuyệt đối đo được khi kiểm chứng.
 """
 import logging
@@ -31,6 +32,9 @@ from sensors import SENSORS, fmt, is_valid, num, thresholds
 
 try:
     from sklearn.ensemble import RandomForestRegressor
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
 except ImportError:
     RandomForestRegressor = None
 
@@ -74,8 +78,8 @@ WEIGHTS = np.linspace(0, 1, 11)   # hệ số tin Random Forest được thử: 
 RETRAIN_SEC = 900    # học lại mỗi 15 phút (mỗi 15 phút có thêm mẫu mới)
 RETRY_SEC = 120      # chưa đủ dữ liệu: đếm lại mỗi 2 phút
 RF_PARAMS = dict(n_estimators=200, max_depth=10, min_samples_leaf=5, max_features=0.5, random_state=42, n_jobs=1)
-METHOD = ("Random Forest (200 cây), dự báo trực tiếp mức thay đổi sau 1–3 giờ, kết hợp với 'giữ nguyên giá trị' "
-          "theo hệ số tin cậy chọn bằng kiểm chứng walk-forward theo thời gian")
+METHOD = ("Random Forest (200 cây) + hồi quy tuyến tính Ridge, dự báo trực tiếp mức thay đổi sau 1–3 giờ, kết hợp "
+          "với 'giữ nguyên giá trị' theo hệ số chọn bằng kiểm chứng walk-forward theo thời gian")
 
 
 def _features(state, prev, devices, w_now, w_fut, t_mid, hz):
@@ -99,12 +103,40 @@ def _clean(r):
     return all(is_valid(k, r.get(k)) for k in INDOOR)
 
 
-def _best_w(pred, y):
-    """Hệ số w (trong WEIGHTS) cho sai số tuyệt đối nhỏ nhất của w × pred so với y; hòa thì chọn w nhỏ hơn."""
+def _linear_fit(X, Y, HZ):
+    """Hồi quy tuyến tính Ridge, mỗi mốc giờ 1 mô hình (mức thay đổi tăng theo h, không cộng như 1 biến).
+    Ít tham số nên học được từ ít dữ liệu (vd "ngoài trời nóng lên 2°C thì trong nhà nóng lên ~1°C").
+    Xu hướng chưa có (NaN) coi là 0 = chưa thấy đổi."""
+    out = {}
+    for hz in HORIZONS:
+        sel = HZ == hz
+        if sel.sum() >= 8:
+            out[hz] = make_pipeline(StandardScaler(), Ridge(alpha=10.0)).fit(np.nan_to_num(X[sel]), Y[sel])
+    return out
+
+
+def _linear_predict(models, X, HZ):
+    P = np.zeros((len(X), len(TARGETS)))
+    for hz, m in models.items():
+        sel = HZ == hz
+        if sel.any():
+            P[sel] = m.predict(np.nan_to_num(X[sel]))
+    return P
+
+
+def _best_mix(rf, lin, y):
+    """Hệ số (a, b), a + b ≤ 1, cho sai số tuyệt đối nhỏ nhất của a × Random Forest + b × tuyến tính so với y
+    (phần còn lại 1 − a − b là "giữ nguyên"). Hòa thì chọn tổng nhỏ hơn (gần "giữ nguyên" hơn)."""
     if not len(y):
-        return 0.0
-    errs = [np.abs(w * pred - y).mean() for w in WEIGHTS]
-    return float(WEIGHTS[int(np.argmin(errs))])
+        return 0.0, 0.0
+    best = (np.abs(y).mean(), 0.0, 0.0, 0.0)
+    for a in WEIGHTS:
+        for b in WEIGHTS:
+            if a + b <= 1 + 1e-9:
+                err = np.abs(a * rf + b * lin - y).mean()
+                if err < best[0] - 1e-12:
+                    best = (err, a + b, float(a), float(b))
+    return best[2], best[3]
 
 
 class RFAnalyzer:
@@ -112,6 +144,7 @@ class RFAnalyzer:
         self.store = store
         self.weather = weather
         self.model = None
+        self.linear = {}    # mốc giờ -> hồi quy tuyến tính (Ridge)
         self.eval = {}      # (giờ, chỉ số) -> {"mae", "mae_base", "skill", "q80", "q80_base", "use_rf"}
         self.info = {"name": "Random Forest", "method": METHOD, "trained": False, "validated": False,
                      "samples": 0, "skipped": 0, "period": None, "trained_at": None,
@@ -168,10 +201,11 @@ class RFAnalyzer:
     # ------------------------------------------------------------------ huấn luyện + kiểm chứng
     @staticmethod
     def _folds(T, HZ):
-        """Walk-forward theo thời gian: chia khoảng thời gian thành FOLDS + 1 đoạn, thử lần lượt trên các đoạn sau;
-        tập học chỉ gồm mẫu mà kết quả (lúc τ + h) đã có TRƯỚC khi đoạn thử bắt đầu."""
-        t0, t1 = T.min(), T.max() + STEP
-        edges = np.linspace(t0, t1, FOLDS + 2)
+        """Walk-forward theo thời gian: chia dữ liệu (xếp theo thời gian) thành FOLDS + 1 đoạn có số mẫu gần bằng nhau,
+        thử lần lượt trên các đoạn sau; tập học chỉ gồm mẫu mà kết quả (lúc τ + h) đã có TRƯỚC khi đoạn thử bắt đầu.
+        Chia theo số mẫu (không theo khoảng thời gian) để dữ liệu rải rác nhiều ngày vẫn đủ mẫu mỗi đoạn."""
+        edges = np.quantile(T, np.linspace(0, 1, FOLDS + 2))
+        edges[-1] = T.max() + STEP
         out = []
         for a, b in zip(edges[1:-1], edges[2:]):
             te = np.where((T >= a) & (T < b))[0]
@@ -202,37 +236,40 @@ class RFAnalyzer:
                 + ". Chưa dự báo khi chưa kiểm chứng được."))
             return
 
-        # Dự báo của từng đoạn thử (mô hình chỉ học dữ liệu trước đoạn đó)
-        runs = [(te, RandomForestRegressor(**RF_PARAMS).fit(X[tr], Y[tr]).predict(X[te])) for tr, te in folds]
+        # Dự báo của từng đoạn thử bằng 2 mô hình, mỗi mô hình chỉ học dữ liệu trước đoạn đó
+        runs = [(te, RandomForestRegressor(**RF_PARAMS).fit(X[tr], Y[tr]).predict(X[te]),
+                 _linear_predict(_linear_fit(X[tr], Y[tr], HZ[tr]), X[te], HZ[te])) for tr, te in folds]
         self.eval, table, n_test = {}, [], 0
         for hz in HORIZONS:
             for j, k in enumerate(TARGETS):
-                parts = [(P[HZ[te] == hz, j], Y[te][HZ[te] == hz, j]) for te, P in runs]
-                # w của đoạn i chọn từ các đoạn trước i -> đoạn đầu chỉ dùng để chọn, không chấm điểm
+                parts = [(P[HZ[te] == hz, j], L[HZ[te] == hz, j], Y[te][HZ[te] == hz, j]) for te, P, L in runs]
+                cat = lambda ps, c: np.concatenate([p[c] for p in ps])
+                # hệ số của đoạn i chọn từ các đoạn trước i -> đoạn đầu chỉ dùng để chọn, không chấm điểm
                 em, eb = [], []
                 for i in range(1, len(parts)):
-                    w = _best_w(np.concatenate([p for p, _ in parts[:i]]), np.concatenate([y for _, y in parts[:i]]))
-                    p, y = parts[i]
-                    em.append(np.abs(w * p - y))
+                    a, b = _best_mix(cat(parts[:i], 0), cat(parts[:i], 1), cat(parts[:i], 2))
+                    p, lin, y = parts[i]
+                    em.append(np.abs(a * p + b * lin - y))
                     eb.append(np.abs(y))   # mốc chuẩn "giữ nguyên": thay đổi dự báo = 0
                 em, eb = np.concatenate(em), np.concatenate(eb)
                 if not len(em):
                     continue
-                w = _best_w(np.concatenate([p for p, _ in parts]), np.concatenate([y for _, y in parts]))
+                a, b = _best_mix(cat(parts, 0), cat(parts, 1), cat(parts, 2))
                 mae, mae_b = float(em.mean()), float(eb.mean())
                 if mae_b > 1e-9:
                     skill = max(-100.0, min(100.0, (1 - mae / mae_b) * 100))
                 else:  # số liệu không đổi -> giữ nguyên là đúng tuyệt đối
                     skill = 0.0 if mae < 1e-9 else -100.0
-                use_rf = w > 0 and skill > 0
+                use_rf = a + b > 0 and skill > 0
                 if not use_rf:  # ô này dự báo = giữ nguyên -> sai số của dự báo chính là sai số giữ nguyên
-                    mae, skill = mae_b, 0.0
-                e = {"mae": mae, "mae_base": mae_b, "skill": skill, "use_rf": use_rf, "w": w if use_rf else 0.0,
+                    mae, skill, a, b = mae_b, 0.0, 0.0, 0.0
+                e = {"mae": mae, "mae_base": mae_b, "skill": skill, "use_rf": use_rf, "w": a, "w_lin": b,
                      "q80": float(np.quantile(em if use_rf else eb, 0.8))}
                 self.eval[(hz, k)] = e
                 n_test = max(n_test, len(em))
                 table.append({"hours": hz, "key": k, "mae": round(mae, 3), "mae_base": round(mae_b, 3),
-                              "skill": round(skill), "use_rf": use_rf, "w": round(e["w"], 1), "n": int(len(em))})
+                              "skill": round(skill), "use_rf": use_rf, "w": round(a, 1), "w_lin": round(b, 1),
+                              "n": int(len(em))})
         if not self.eval:
             self.model = None
             self.info.update(trained=False, validated=False, evaluation=[], importance=[],
@@ -242,14 +279,14 @@ class RFAnalyzer:
         model = RandomForestRegressor(**RF_PARAMS).fit(X, Y)
         imp = dict(zip(FEATURES, model.feature_importances_))
         groups = sorted(((name, sum(imp[f] for f in feats)) for name, feats in GROUPS.items()), key=lambda g: -g[1])
-        self.model = model
+        self.model, self.linear = model, _linear_fit(X, Y, HZ)
         better = sum(1 for e in self.eval.values() if e["use_rf"])
         self.info.update(
             trained=True, validated=True, trained_at=now, evaluation=table,
             test_samples=n_test, folds=len(folds) - 1,
             importance=[{"name": n, "pct": round(v * 100)} for n, v in groups if v >= 0.03][:5],
             note=(f"Học từ {len(X)} mẫu, kiểm chứng walk-forward {len(folds) - 1} lần trên {n_test} mẫu chưa thấy; "
-                  f"Random Forest giúp dự báo tốt hơn 'giữ nguyên' ở {better}/{len(self.eval)} chỉ số × mốc giờ, "
+                  f"mô hình (Random Forest + tuyến tính) dự báo tốt hơn 'giữ nguyên' ở {better}/{len(self.eval)} chỉ số × mốc giờ, "
                   "các ô còn lại dùng 'giữ nguyên'"
                   + (f"; đã loại {skipped} đoạn cảm biến lỗi" if skipped else "")),
         )
@@ -281,7 +318,9 @@ class RFAnalyzer:
                 x = _features(state, prev, devices, self.weather.at(t_mid), self.weather.at(t_mid + hz * 3600), t_mid, hz)
                 if x is None:
                     break  # thiếu thời tiết hoặc cảm biến chưa có số đo
-                dy = dict(zip(TARGETS, self.model.predict(np.array([x], dtype=float))[0]))
+                xa = np.array([x], dtype=float)
+                dy = dict(zip(TARGETS, self.model.predict(xa)[0]))
+                dl = dict(zip(TARGETS, _linear_predict(self.linear, xa, np.array([hz]))[0]))
                 row = {"hours": hz, "range": {}, "basis": {}}
                 for k in TARGETS:
                     # gốc = trung bình 15 phút (giống lúc học): cảm biến nhảy số (độ mặn, ánh sáng) đỡ lệch hơn 1 lần đo.
@@ -293,7 +332,7 @@ class RFAnalyzer:
                         row[k] = None   # độ ẩm đất 0% = cảm biến lỗi -> không dự báo
                         continue
                     lo, hi = SENSORS[k]["phys"]
-                    value = base + e["w"] * float(dy[k])
+                    value = base + e["w"] * float(dy[k]) + e["w_lin"] * float(dl[k])
                     err = e["q80"]
                     digits = 2 if k == "GT_PH" else 1
                     row[k] = round(min(max(value, lo), hi), digits)

@@ -1,4 +1,4 @@
-# Phương pháp dự báo vi khí hậu nhà nấm (Random Forest + thời tiết)
+# Phương pháp dự báo vi khí hậu nhà nấm (Random Forest + hồi quy tuyến tính + thời tiết)
 
 Mã nguồn: [server/rf_model.py](../server/rf_model.py). Kết quả kiểm chứng thực tế được hiển thị trực tiếp trên web (tab **Phân tích AI → Mô hình Random Forest**) và được tính lại mỗi giờ.
 
@@ -40,10 +40,11 @@ Số đoạn bị loại được hiển thị trên web.
 ## 5. Mô hình
 - **Một** `RandomForestRegressor` (Breiman, 2001) nhiều đầu ra: 200 cây, độ sâu tối đa 10, tối thiểu 5 mẫu/lá, mỗi lần tách xét ngẫu nhiên 50% số biến.
 - **Đầu ra (6):** *mức thay đổi* của 6 chỉ số sau h giờ so với trạng thái hiện tại; h là biến đầu vào nên một mô hình dự báo cả 3 mốc.
-- **Dự báo = trung bình 15 phút hiện tại + w × mức thay đổi Random Forest dự báo.**
+- **Mô hình thứ hai: hồi quy tuyến tính Ridge** (chuẩn hóa biến, α = 10), mỗi mốc giờ một mô hình, cùng 28 biến đầu vào (xu hướng chưa có coi là 0). Ít tham số nên học được từ ít dữ liệu, ví dụ “ngoài trời nóng lên 2°C thì trong nhà nóng lên khoảng 1°C”. Random Forest cần nhiều dữ liệu hơn nhưng bắt được quan hệ phi tuyến (ngưỡng bật thiết bị, ngày/đêm).
+- **Dự báo = trung bình 15 phút hiện tại + a × thay đổi Random Forest dự báo + b × thay đổi tuyến tính dự báo** (a, b ∈ {0; 0,1; …; 1}, a + b ≤ 1).
   - Gốc là trung bình 15 phút, giống lúc học, chứ không phải 1 lần đo. Cảm biến nhảy số (độ mặn, ánh sáng) nhờ vậy không làm lệch dự báo.
-  - w ∈ {0; 0,1; …; 1} là **hệ số tin cậy** chọn riêng cho từng chỉ số × mốc giờ, sao cho sai số kiểm chứng nhỏ nhất. w = 1: tin hẳn Random Forest. w = 0: giữ nguyên. Ở giữa: kết hợp hai cách (co hệ số – shrinkage).
-  - Cách kết hợp này đảm bảo dự báo không kém mốc chuẩn ở những ô mà Random Forest chưa học được gì.
+  - a, b là **hệ số tin cậy** chọn riêng cho từng chỉ số × mốc giờ sao cho sai số kiểm chứng nhỏ nhất; phần còn lại 1 − a − b là “giữ nguyên” (kết hợp mô hình – ensemble, co hệ số – shrinkage).
+  - Cách kết hợp này đảm bảo dự báo không kém mốc chuẩn ở những ô mà mô hình chưa học được gì.
   - Học *mức thay đổi* thay vì giá trị tuyệt đối: khi dữ liệu ít, mô hình không bị kéo về giá trị trung bình lịch sử.
   - Dự báo **trực tiếp** từng mốc giờ, không lặp từng bước: sai số không cộng dồn.
 - Học lại mỗi 15 phút trên **toàn bộ dữ liệu đã lưu** (tối đa 365 ngày, 20.000 mẫu gần nhất); dự báo tính lại mỗi 2 phút. Giờ cũ chưa có thời tiết (máy chủ lâu không chạy) được lấy bù từ kho lưu trữ Open-Meteo (ERA5).
@@ -52,12 +53,13 @@ Số đoạn bị loại được hiển thị trên web.
 ## 6. Kiểm chứng
 - **Walk-forward theo thời gian (5 đoạn):** chia khoảng thời gian có dữ liệu thành các đoạn liên tiếp. Mỗi lần thử trên một đoạn **sau**, mô hình chưa thấy đoạn đó. Không xáo trộn dữ liệu theo thời gian, vì xáo trộn sẽ cho kết quả đẹp giả.
 - **Không rò rỉ dữ liệu:** tập học của mỗi lần chỉ gồm các mẫu mà *kết quả* (lúc τ + h) đã có **trước** khi đoạn thử bắt đầu, giống hệt tình huống dự báo thật.
-- **Chọn w cũng không nhìn trước:** w dùng để chấm đoạn thử thứ i chỉ được chọn từ các đoạn **trước** i. Đoạn đầu chỉ dùng để chọn w, không chấm điểm. Vì vậy sai số báo cáo là sai số thật trên dữ liệu chưa thấy, không phải chọn xong rồi chấm trên chính dữ liệu đó.
+- **Chia đoạn theo số mẫu:** mỗi đoạn có số mẫu gần bằng nhau (không chia đều theo thời gian), để dữ liệu rải rác nhiều ngày vẫn đủ mẫu mỗi đoạn.
+- **Chọn hệ số cũng không nhìn trước:** a, b dùng để chấm đoạn thử thứ i chỉ được chọn từ các đoạn **trước** i. Đoạn đầu chỉ dùng để chọn w, không chấm điểm. Vì vậy sai số báo cáo là sai số thật trên dữ liệu chưa thấy, không phải chọn xong rồi chấm trên chính dữ liệu đó.
 - **Mốc chuẩn "giữ nguyên" (persistence):** dự báo giá trị sau h giờ = giá trị hiện tại. Đây là mốc chuẩn tiêu chuẩn trong dự báo chuỗi thời gian (Hyndman & Athanasopoulos). Mô hình chỉ có ý nghĩa khi tốt hơn mốc này.
 - **Chỉ số đánh giá:**
   - MAE: sai số tuyệt đối trung bình, cùng đơn vị với chỉ số.
   - Skill (%) = (1 − MAE<sub>mô hình</sub> / MAE<sub>giữ nguyên</sub>) × 100. Dương nghĩa là mô hình tốt hơn.
-- **Quy tắc hiển thị:** với mỗi cặp (chỉ số, mốc giờ), nếu Random Forest không làm sai số nhỏ hơn (w = 0 hoặc skill ≤ 0) thì dự báo = **giữ nguyên**: ô màu xám, ghi “giữ nguyên” và **không dùng để đưa gợi ý**.
+- **Quy tắc hiển thị:** với mỗi cặp (chỉ số, mốc giờ), nếu mô hình không làm sai số nhỏ hơn (a = b = 0 hoặc skill ≤ 0) thì dự báo = **giữ nguyên**: ô màu xám, ghi “giữ nguyên” và **không dùng để đưa gợi ý**.
 - **Đối chiếu sau khi dự báo (dữ liệu thật):** mỗi lần dự báo được lưu lại. Tới giờ được dự báo, máy chủ so với trung bình số đo ±7,5 phút. Ô có ít hơn 8 lần so thì ghi “đang đo”, vì 1 lần đo lỗi có thể làm lệch cả ô. Bảng này chỉ tính các dự báo từ bản sửa này trở đi; dự báo của bản cũ (học cả số liệu đứng yên) vẫn nằm trong cơ sở dữ liệu nhưng không tính.
 - **Chưa kiểm chứng thì chưa dự báo:** cần ít nhất 60 mẫu và 2 lần kiểm chứng, thường là khoảng 84 mẫu. Máy chủ mới (chưa có dữ liệu) cần khoảng **9 giờ mạch ESP32 và máy tính chạy liền** (chạy liền S giờ được khoảng 12·S − 24 mẫu, vì mỗi mẫu cần số đo thật 1–3 giờ sau). Dữ liệu của các lần chạy trước đều được dùng, nên các lần sau có dự báo ngay. Trước đó web ghi “AI đang học” kèm số giờ còn thiếu. Trong lúc đó web vẫn báo các chỉ số **đang** ngoài ngưỡng.
 
@@ -82,17 +84,18 @@ Mỗi ô dự báo kèm **±**: phân vị 80% của sai số tuyệt đối đo
 
 | Chỉ số | Bản cũ +1 / +2 / +3 giờ | Bản này +1 / +2 / +3 giờ |
 |---|---|---|
-| Nhiệt độ | +7% / +19% / +28% | **+71% / +68% / +64%** |
-| Độ ẩm KK | 0% / +9% / +16% | **+72% / +69% / +69%** |
-| Độ ẩm đất | −13% / −11% / −7% | +4% / −1% / −1% |
-| Ánh sáng | +21% / +32% / +37% | **+16% / +30% / +37%** |
-| pH | −9% / 0% / +5% | +5% / +6% / −9% |
-| Độ mặn | −5% / −3% / −1% | **+86% / +85% / +85%** |
+| Nhiệt độ | +7% / +19% / +28% | **+69% / +69% / +66%** |
+| Độ ẩm KK | 0% / +9% / +16% | **+70% / +70% / +71%** |
+| Độ ẩm đất | −13% / −11% / −7% | +3% / +4% / **+18%** |
+| Ánh sáng | +21% / +32% / +37% | −8% / **+22% / +47%** |
+| pH | −9% / 0% / +5% | +9% / +7% / +3% |
+| Độ mặn | −5% / −3% / −1% | **+86% / +85% / +86%** |
 
-Lúc học (walk-forward), bản cũ chỉ 9/18 ô dương (thấp nhất −39%), bản này 15/18 ô dương, các ô còn lại dùng "giữ nguyên". Số liệu thật của nhà nấm sẽ khác, nên xem bảng trên web.
+Lúc học (walk-forward), bản cũ chỉ 9/18 ô dương (thấp nhất −39%), bản này 15/18 ô dương, các ô còn lại dùng "giữ nguyên". Khi mới có ít dữ liệu (2 ngày chạy liền), thêm hồi quy tuyến tính làm số ô có dự báo thật (không phải giữ nguyên) tăng từ 10/18 lên 14/18; riêng nhiệt độ từ 0/3 lên 2/3 mốc giờ. Số liệu thật của nhà nấm sẽ khác, nên xem bảng trên web.
 
 ## Tài liệu tham khảo
 - L. Breiman (2001). *Random Forests*. Machine Learning 45(1), 5–32.
 - R. J. Hyndman, G. Athanasopoulos (2021). *Forecasting: Principles and Practice*, 3rd ed., OTexts. Các mục 5.2 (phương pháp đơn giản làm mốc chuẩn) và 5.10 (kiểm chứng chéo theo chuỗi thời gian).
-- scikit-learn: `RandomForestRegressor`.
+- A. E. Hoerl, R. W. Kennard (1970). *Ridge Regression: Biased Estimation for Nonorthogonal Problems*. Technometrics 12(1), 55–67.
+- scikit-learn: `RandomForestRegressor`, `Ridge`.
 - Open-Meteo Weather Forecast API: https://open-meteo.com

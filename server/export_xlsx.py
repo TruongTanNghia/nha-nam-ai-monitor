@@ -74,8 +74,9 @@ def build(engine, days=30):
                         "Thiết bị: tỉ lệ thời gian bật trong phút (1 = bật cả phút). Lúc mạch ESP32 tắt/mất mạng "
                         "không ghi (không có số đo thật); ô trống = cảm biến đọc lỗi (báo đúng 0)."],
         ["Dự báo & thực tế", f"{len(groups)} lần dự báo ({len(done)} đã có kết quả). Dự báo 15 phút/lần "
-                             "cho 1, 2, 3 giờ tới = trung bình 15 phút hiện tại + w × mức thay đổi Random Forest dự báo "
-                             "(w chọn bằng kiểm chứng walk-forward; w = 0 là giữ nguyên); 'thực tế' = trung bình số đo "
+                             "cho 1, 2, 3 giờ tới = trung bình 15 phút hiện tại + a × thay đổi Random Forest dự báo + b × thay đổi "
+                             "hồi quy tuyến tính dự báo (a, b chọn bằng kiểm chứng walk-forward; a = b = 0 là giữ nguyên); "
+                             "'thực tế' = trung bình số đo "
                              "±7,5 phút quanh giờ được dự báo."],
         ["Tổng hợp sai số", "Sai số tuyệt đối trung bình của dự báo so với cách 'giữ nguyên giá trị lúc dự báo' "
                             "(mốc chuẩn persistence), trên dữ liệu thật sau khi dự báo; kèm kết quả kiểm chứng "
@@ -99,11 +100,11 @@ def build(engine, days=30):
             for s in sorted(ForecastLog.score(done), key=lambda s: (TARGETS.index(s["key"]), s["hours"]))]
     rows += [[""] * 7, ["KIỂM CHỨNG WALK-FORWARD LÚC HUẤN LUYỆN (dữ liệu mô hình chưa thấy)"] + [""] * 6]
     rows += [[f"+{e['hours']} giờ", label(e["key"]), e["n"], e["mae"], e["mae_base"], e["skill"],
-              f"Có (w = {e.get('w', 1)})" if e["use_rf"] else "Giữ nguyên"]
+              f"Có (RF {e.get('w', 1)} + tuyến tính {e.get('w_lin', 0)})" if e["use_rf"] else "Giữ nguyên"]
              for e in sorted(engine.rf.info.get("evaluation") or [], key=lambda e: (TARGETS.index(e["key"]), e["hours"]))]
     _sheet(wb, "Tổng hợp sai số",
            ["Dự báo trước", "Chỉ số", "Số lần so", "Sai số TB dự báo", "Sai số TB giữ nguyên",
-            "Dự báo tốt hơn (%)", "Dùng Random Forest?"], rows, [13, 26, 11, 16, 16, 13, 11])
+            "Dự báo tốt hơn (%)", "Dùng mô hình?"], rows, [13, 26, 11, 16, 16, 13, 11])
 
     # 5) Thời tiết ngoài trời
     weather = store.weather_between(since, now)
