@@ -194,7 +194,8 @@ function renderRF() {
   const w = backend.snapshot?.weather;
   const th = backend.snapshot?.data || {};
   let body;
-  if (backend.hardwareOffline) {
+  const demo = !!rf?.demo;  // DEMO_FORECAST=true trong server/.env: số giả lập để xem giao diện
+  if (backend.hardwareOffline && !demo) {
     body = emptyState("unplug", "Tạm dừng phân tích", "ESP32 đang mất kết nối nên số liệu trong nhà đã cũ.");
   } else if (!rf?.predictions?.length) {
     const pct = Math.min(100, Math.round(((rf?.samples || 0) / (rf?.need || 84)) * 100));
@@ -212,6 +213,7 @@ function renderRF() {
         // Mỗi ô chỉ 1 con số; khoảng sai số để ở tooltip, độ tin cậy xem bảng kiểm chứng (tab Phân tích AI)
         const r = p?.range?.[k];
         const persist = p?.basis?.[k] === "persist";
+        if (demo && p) return `<div class="rf-val" title="DEMO: số giả lập, không phải dự báo của mô hình">${fmtWithUnit(k, v)}</div>`;
         const tip = (r ? `Khoảng ${fmtWithUnit(k, r[0])} – ${fmtWithUnit(k, r[1])} (theo sai số kiểm chứng)` : "")
           + (persist ? " · Giữ nguyên giá trị hiện tại: kiểm chứng thấy mô hình chưa dự báo tốt hơn ở ô này" : "");
         return `<div class="rf-val ${bad(v) ? "warn" : persist ? "persist" : ""}" title="${esc(tip)}">${fmtWithUnit(k, v)}</div>`;
@@ -220,9 +222,9 @@ function renderRF() {
         + cell(th[k] !== undefined && th[k] !== null ? Number(th[k]) : rf.now?.[k]) + rf.predictions.map((p) => cell(p[k], p)).join("");  // "Bây giờ" = số đo mới nhất
     }).join("");
     body = `<div class="rf-table" style="--cols:${rf.predictions.length + 1}">${head}${rows}</div>
-      <p class="rf-legend">Dự báo lúc ${rf.ts ? fmtHour(rf.ts) : "—"}, mô hình học lúc ${rf.trained_at ? fmtHour(rf.trained_at) : "—"} (học lại mỗi 15 phút) · Độ chính xác: xem bảng kiểm chứng ở tab Phân tích AI</p>`;
+      ${demo ? `<p class="rf-legend"><b>DEMO</b> — số giả lập (số đo hiện tại ± 1–3 đơn vị, trong khoảng đã thu thập) để xem giao diện, không phải dự báo của mô hình · cập nhật lúc ${fmtHour(rf.ts)}</p>` : `<p class="rf-legend">Dự báo lúc ${rf.ts ? fmtHour(rf.ts) : "—"}, mô hình học lúc ${rf.trained_at ? fmtHour(rf.trained_at) : "—"} (học lại mỗi 15 phút) · Độ chính xác: xem bảng kiểm chứng ở tab Phân tích AI</p>`}`;
   }
-  const advice = rf?.advice?.length && !backend.hardwareOffline
+  const advice = rf?.advice?.length && (!backend.hardwareOffline || demo)
     ? `<ul class="rf-advice">${rf.advice.map((t) => `<li>${icon("lightbulb")}<span>${esc(t)}</span></li>`).join("")}</ul>` : "";
   setHTML(el, weatherNowHTML(w) + body + advice);
 }

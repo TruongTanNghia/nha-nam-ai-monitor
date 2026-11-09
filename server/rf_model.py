@@ -23,6 +23,7 @@ Tóm tắt:
 """
 import logging
 import math
+import random
 import time
 
 import numpy as np
@@ -46,7 +47,8 @@ OUT = ["temp", "hum", "cloud", "rad", "precip", "wind"]   # thời tiết lúc h
 OUT_FUT = ["temp", "hum", "rad", "precip"]                 # thời tiết lúc cần dự báo (dự báo Open-Meteo)
 TREND = ["t", "h", "GT_AMDAT", "ANHSANG"]                  # xu hướng: thay đổi trong 1 giờ qua (đang nóng lên/nguội đi...)
 TARGETS = ["t", "h", "GT_AMDAT", "ANHSANG", "GT_PH", "GT_DOMAN"]
-LIVE_BASE = {"GT_AMDAT"}   # dự báo tính từ số đo mới nhất thay cho trung bình 15 phút
+LIVE_BASE = {"GT_AMDAT"}
+DEMO_STEP = {"GT_PH": (0.1, 0.3)}   # DEMO: ± 1–3 đơn vị; pH ± 0,1–0,3 (± 1–3 pH là vô lý)   # dự báo tính từ số đo mới nhất thay cho trung bình 15 phút
 HORIZONS = (1, 2, 3)
 OUTPUTS = [(hz, k) for hz in HORIZONS for k in TARGETS]
 # Thay đổi lớn nhất hợp lý trong 1 giờ trong nhà nấm; vượt quá = lỗi cảm biến, bỏ khi học
@@ -152,6 +154,7 @@ class RFAnalyzer:
         self.result = None
         self.last_train = 0
         self.streak_hours = 0.0
+        self._demo_ranges = (0, {})
 
     # ------------------------------------------------------------------ dữ liệu
     def _dataset(self, now):
@@ -349,6 +352,36 @@ class RFAnalyzer:
             "ts": now,
         }
         return self.result
+
+    def demo(self, data, now=None):
+        """DEMO (DEMO_FORECAST=true, máy không có cảm biến): số GIẢ LẬP = số đo hiện tại ± ngẫu nhiên 1–3 đơn vị,
+        kẹp trong khoảng đã thu thập. Không phải dự báo của mô hình; không ghi vào nhật ký dự báo / CSV / Sheet."""
+        now = now or time.time()
+        if now - self._demo_ranges[0] > 600:  # khoảng đã thu thập: tính lại 10 phút/lần (gọi 5 giây/lần khi mô phỏng)
+            self._demo_ranges = (now, self.store.sensor_ranges(now - config.HISTORY_RETENTION_DAYS * 86400))
+        ranges = self._demo_ranges[1]
+        live = {k: num(data.get(k)) for k in INDOOR}
+        rng = random.Random(int(now // STEP))   # giữ nguyên trong 15 phút, không nhảy số mỗi lần tải trang
+        predictions = []
+        for hz in HORIZONS:
+            row = {"hours": hz, "range": {}, "basis": {}}
+            for k in TARGETS:
+                v = live[k]
+                if v is None or (k != "GT_AMDAT" and not is_valid(k, v)):
+                    row[k] = None
+                    continue
+                lo, hi = ranges.get(k, SENSORS[k]["phys"])
+                d = rng.uniform(*DEMO_STEP.get(k, (1.0, 3.0))) * rng.choice((-1, 1))
+                row[k] = round(min(max(v + d, min(lo, v)), max(hi, v)), 2 if k == "GT_PH" else 1)
+                row["basis"][k] = "demo"
+            predictions.append(row)
+        return {
+            **self.info, "demo": True, "validated": True, "trained_at": now, "ts": now,
+            "note": "DEMO: số giả lập (số đo hiện tại ± 1–3 đơn vị), không phải dự báo của mô hình",
+            "now": {k: (round(live[k], 2 if k == "GT_PH" else 1) if live[k] is not None else None) for k in INDOOR},
+            "predictions": predictions,
+            "advice": self._advice(predictions, live, thresholds(data), now),
+        }
 
     def _advice(self, predictions, live, th, now):
         """So số đo hiện tại + dự báo với ngưỡng: đang ngoài ngưỡng (luôn báo, kể cả khi mô hình đang học),

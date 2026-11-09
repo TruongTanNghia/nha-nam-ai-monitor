@@ -48,10 +48,15 @@ export function thresholds(data) {
   return out;
 }
 
+// Lúc mô phỏng (chưa có mạch ESP32): hiện số thực (1 chữ số lẻ) cho cả độ ẩm, ánh sáng... để thấy số nhảy
+let fineDigits = false;
+export function setFineDigits(on) { fineDigits = !!on; }
+
 export function fmtValue(key, value) {
   const meta = SENSOR_BY_KEY[key];
   if (value === null || value === undefined) return "—";
-  return meta.digits ? value.toFixed(meta.digits) : Math.round(value).toLocaleString("vi-VN");
+  const digits = meta.digits || (fineDigits ? 1 : 0);
+  return digits ? value.toFixed(digits) : Math.round(value).toLocaleString("vi-VN");
 }
 
 export function fmtWithUnit(key, value) {

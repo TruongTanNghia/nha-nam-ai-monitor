@@ -9,7 +9,7 @@ import {
 
 import {
   DEVICES, LEVEL_ICON, LEVEL_TEXT, SENSORS, SETTINGS, WATER_KEYS,
-  fmtValue, localIndices, num, sensorStatus, thresholdText, thresholds,
+  fmtValue, localIndices, num, sensorStatus, setFineDigits, thresholdText, thresholds,
 } from "./js/sensors.js";
 import { $, $$, esc, fmtClock, icon, refreshIcons, setHTML, timeAgo, toast } from "./js/ui.js";
 import { buildChartCards, gaugeSVG, renderCharts, resetCharts, sparkline, updateGauge } from "./js/charts.js";
@@ -442,6 +442,18 @@ $$("[data-range]").forEach((btn) => btn.addEventListener("click", () => {
 /* =========================
    DỮ LIỆU REALTIME
 ========================= */
+/** Máy chủ đang MÔ PHỎNG (DEMO_FORECAST=true, mạch ESP32 không gửi số): số cảm biến hiển thị là số giả lập. */
+function simActive() {
+  return backend.online && !!backend.snapshot?.sim?.active && !!backend.snapshot.sim.data;
+}
+
+/** Số liệu để hiển thị: số thật của ESP32 (Firebase); khi mô phỏng thì thay phần cảm biến bằng số mô phỏng,
+ *  còn thiết bị / chế độ / ngưỡng vẫn của Firebase (bấm trên web vẫn có tác dụng). */
+function view() {
+  setFineDigits(simActive());
+  return state.data && simActive() ? { ...state.data, ...backend.snapshot.sim.data } : state.data;
+}
+
 function pushLive(data) {
   const now = Date.now();
   const last = state.live[state.live.length - 1];
@@ -453,7 +465,7 @@ function pushLive(data) {
 }
 
 function renderAll() {
-  const data = state.data;
+  const data = view();
   if (!data) return;
   renderMode(data);
   renderHero(data);
@@ -461,7 +473,7 @@ function renderAll() {
   renderDeviceStrip(data);
   renderDeviceControls(data);
   renderSettings(data);
-  $("#lastUpdate").textContent = `Cập nhật lúc ${fmtClock(state.lastDataAt)} · ${new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit" })}`;
+  $("#lastUpdate").textContent = `${simActive() ? "MÔ PHỎNG (chưa có mạch ESP32) · " : ""}Cập nhật lúc ${fmtClock(simActive() ? Date.now() : state.lastDataAt)} · ${new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit" })}`;
 }
 
 /* =========================
@@ -472,6 +484,7 @@ function renderAll() {
 function hardwareStatus() {
   const data = state.data;
   if (!data) return { level: "wait", text: "Đang kết nối Firebase…" };
+  if (simActive()) return { level: "sim", text: "ESP32 mô phỏng — chưa có mạch, số cảm biến là số giả lập (có mạch là tự dùng số thật)" };
   const now = Date.now();
   const espTs = Number(data.ESP_TS);
   let age, exact = false;
@@ -496,12 +509,13 @@ function renderHardware() {
   const hw = hardwareStatus();
   backend.hardwareOffline = hw.level === "off";
   const conn = $("#connEsp");
-  conn.classList.toggle("on", hw.level === "ok");
+  conn.classList.toggle("on", hw.level === "ok" || hw.level === "sim");
   conn.classList.toggle("warn", hw.level === "warn" || hw.level === "wait");
   conn.title = hw.text;
   const m = $("#mEsp");  // thanh trên cùng (điện thoại)
-  m.className = `m-status ${hw.level}`;
-  m.lastChild.textContent = hw.level === "ok" ? "ESP32 online" : hw.level === "off" ? "ESP32 mất kết nối" : "ESP32…";
+  m.className = `m-status ${hw.level === "sim" ? "ok" : hw.level}`;
+  m.lastChild.textContent = hw.level === "ok" ? "ESP32 online" : hw.level === "sim" ? "ESP32 mô phỏng"
+    : hw.level === "off" ? "ESP32 mất kết nối" : "ESP32…";
   const banner = $("#hwBanner");
   banner.hidden = hw.level !== "off";
   if (hw.level === "off") {
@@ -525,7 +539,7 @@ onValue(ref(db, "/"), (snapshot) => {
   const sig = SENSORS.map((s) => state.data[s.key]).join("|");
   if (state.sensorSig !== null && sig !== state.sensorSig) state.sensorChangedAt = state.lastDataAt;
   state.sensorSig = sig;
-  pushLive(state.data);
+  pushLive(view());
   renderAll();
   if (state.range === "live") renderChartTab();
 }, (error) => {
@@ -536,10 +550,10 @@ onValue(ref(db, "/"), (snapshot) => {
 /* ESP gửi dữ liệu theo chu kỳ, Firebase chỉ báo khi giá trị đổi -> vẫn thêm điểm định kỳ */
 setInterval(() => {
   if (!state.data) return;
-  pushLive(state.data);
+  pushLive(view());
   if (state.range === "live") renderChartTab();
-  renderSensorTiles(state.data);
-  renderHero(state.data);
+  renderSensorTiles(view());
+  renderHero(view());
 }, 5000);
 
 /* =========================
@@ -569,10 +583,11 @@ async function syncBackend() {
   $("#connServer").title = old ? "Đang nối với máy chủ bản cũ còn chạy ngầm: đóng mọi cửa sổ Nhà Nấm rồi bấm lại CHAY_NHA_NAM.bat (hoặc khởi động lại máy)" : "";
   renderAnalysis();
   renderZalo();
-  if (state.data) {
-    renderHero(state.data);
-    renderSensorTiles(state.data);
-    renderDeviceStrip(state.data);
+  if (state.data) {  // không vẽ lại ô cài ngưỡng (đang gõ dở thì mất)
+    const data = view();
+    renderHero(data);
+    renderSensorTiles(data);
+    renderDeviceStrip(data);
   }
 }
 

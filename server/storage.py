@@ -174,6 +174,14 @@ class Storage:
                 [(r["ts"], r["temp"], r["hum"], r["cloud"], r["rad"], r["precip"], r["wind"]) for r in rows],
             )
 
+    def sensor_ranges(self, since_ts):
+        """Khoảng (thấp nhất, cao nhất) của từng cảm biến trong dữ liệu đã thu thập (bỏ số 0 do đọc lỗi)."""
+        cols = ", ".join(f'MIN(NULLIF("{k}", 0)), MAX(NULLIF("{k}", 0))' if k in ZERO_FAULT
+                         else f'MIN("{k}"), MAX("{k}")' for k in SENSOR_KEYS)
+        with self.lock:
+            row = self.conn.execute(f"SELECT {cols} FROM readings WHERE ts >= ?", (since_ts,)).fetchone()
+        return {k: (row[2 * i], row[2 * i + 1]) for i, k in enumerate(SENSOR_KEYS) if row[2 * i] is not None}
+
     def hours_missing_weather(self, start_ts, end_ts):
         """Các giờ có số đo cảm biến nhưng chưa có thời tiết (để lấy bù từ kho Open-Meteo)."""
         with self.lock:

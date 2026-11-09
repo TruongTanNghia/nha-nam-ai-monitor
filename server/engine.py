@@ -23,6 +23,7 @@ from forecast_log import ForecastLog
 from rf_model import RFAnalyzer, report_lines
 from csv_files import CsvFiles
 from sheet_sync import SheetSync
+from simulator import Simulator
 from sensors import DEVICE_KEYS, DEVICES, MODE_AUTO, RESET_REASONS, SENSOR_KEYS, SENSORS, fmt, num, thresholds
 from storage import Storage
 from weather import Weather
@@ -84,6 +85,11 @@ class Engine:
         self.csv = CsvFiles(self.store, self.forecasts)
         self.disk = {"db_free_mb": None, "tmp_free_mb": None, "db_size_mb": None, "write_error": None, "low": False}
         self.last_disk = 0
+        # DEMO_FORECAST + mạch không gửi số: cảm biến mô phỏng chỉ để hiển thị (không lưu, không cảnh báo)
+        self.sim = Simulator(self.store)
+        self.sim_data = None
+        self.sim_analysis = None
+        self.sim_rows = deque(maxlen=int(7200 / config.POLL_INTERVAL_SEC) + 20)  # ~2 giờ, như self.recent
         self.zalo = ZaloBot()
         self.outbox = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outbox")
         self.lock = threading.RLock()
@@ -176,11 +182,18 @@ class Engine:
                     self.last_backfill = now
                     if self.weather.backfill():
                         self.rf.last_train = 0  # có thêm dữ liệu cũ dùng được -> học lại ngay
-                if now - self.last_rf >= RF_EVERY and self.latest_data and self.esp_online is not False:
+                if now - self.last_rf >= RF_EVERY and self.latest_data:
                     self.last_rf = now
                     with self.lock:
-                        rows, data = list(self.recent), dict(self.latest_data)
-                    self.forecasts.record(self.rf.analyze(rows, data, now))
+                        rows, data, sim = list(self.recent), dict(self.latest_data), self.sim_data
+                    if self.esp_online is not False:  # có mạch: số THẬT -> mô hình thật, ghi nhật ký dự báo
+                        result = self.rf.analyze(rows, data, now)
+                        self.forecasts.record(result)
+                        if config.DEMO_FORECAST and not result.get("predictions"):
+                            # mô hình chưa học xong: hiện số DEMO quanh số đo thật (ghi rõ DEMO, không ghi nhật ký)
+                            self.rf.result = self.rf.demo(data, now)
+                    elif config.DEMO_FORECAST and sim:  # không có mạch: DEMO quanh số mô phỏng, không ghi nhật ký
+                        self.rf.result = self.rf.demo(sim, now)
                 if now - self.last_sheet_push >= SHEET_EVERY / 2:
                     self.last_sheet_push = now
                     self.forecasts.push_sheet(now)
@@ -205,6 +218,8 @@ class Engine:
         now = time.time()
         if data is None:
             self.fail_count += 1
+            if self.sim.active and self.latest_data:  # mất Internet lúc đang mô phỏng: số mô phỏng vẫn chạy
+                self._simulate(self.latest_data, self.latest_values, now)
             if self.fail_count >= 6 and not self.offline_alerted:
                 self.offline_alerted = True
                 self.notify("📡 Mất kết nối tới Firebase hơn 30 giây. Kiểm tra Internet của máy chủ AI.")
@@ -258,8 +273,32 @@ class Engine:
             self.analysis = analysis
         self._process_findings(analysis["findings"], safety_events, now)
         self._flush_devices(now)
+        self._simulate(data, values, now)
 
         self._housekeeping(now)
+
+    def _simulate(self, data, values, now):
+        """DEMO_FORECAST=true và mạch không gửi số (nhịp tim ESP_TS đứng yên): số cảm biến mô phỏng để HIỂN THỊ.
+        Cảnh báo, Zalo, lưu dữ liệu ở trên vẫn chạy theo số thật; số mô phỏng không đi vào đâu ngoài web."""
+        if config.DEMO_FORECAST and self.esp_online is False:
+            started = not self.sim.active
+            sim = self.sim.step(data, now)
+            self.sim_rows.append({"ts": now, **{k: sim[k] for k in SENSOR_KEYS},
+                                  **{k: values[k] for k in DEVICE_KEYS}, "MODE": values["MODE"]})
+            sim_analysis = self.analyzer.evaluate(sim, list(self.sim_rows), now, hw_last_change=now)
+            self.rf.result = self.rf.demo(sim, now)  # bảng dự báo DEMO nhảy theo số mô phỏng (5 giây/lần)
+            if started:
+                log.info("Mạch ESP32 không gửi số -> web hiển thị số MÔ PHỎNG (DEMO_FORECAST=true; không lưu, không cảnh báo)")
+                self.last_rf = 0  # dự báo DEMO ngay
+        else:
+            if self.sim.active:
+                log.info("Mạch ESP32 gửi số lại -> dùng số thật")
+                self.last_rf = 0  # thay dự báo DEMO bằng dự báo thật ngay
+            self.sim.stop()
+            self.sim_rows.clear()
+            sim, sim_analysis = None, None
+        with self.lock:
+            self.sim_data, self.sim_analysis = sim, sim_analysis
 
     @staticmethod
     def _merge_door(changes):
@@ -740,8 +779,11 @@ class Engine:
     def snapshot(self):
         with self.lock:
             return {
-                "data": self.latest_data,
-                "analysis": self.analysis,
+                # không có mạch + DEMO_FORECAST: web hiển thị số mô phỏng (phân tích tính trên số mô phỏng, không cảnh báo)
+                "data": self.sim_data or self.latest_data,
+                "analysis": self.sim_analysis if self.sim_data else self.analysis,
+                "sim": {"active": self.sim_data is not None, "since": self.sim.since,
+                        "data": {k: self.sim_data[k] for k in SENSOR_KEYS} if self.sim_data else None},
                 "last_ok_ts": self.last_ok_ts,
                 "muted_until": self.mute_until if self.mute_until > time.time() else None,
                 "rf": self.rf.result or self.rf.info,

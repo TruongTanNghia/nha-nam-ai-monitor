@@ -152,5 +152,8 @@ if not GOOGLE_SCRIPT_URL:
     GOOGLE_SCRIPT_URL, GOOGLE_SCRIPT_FROM = _script_url_from_secrets()
 
 DB_PATH = SERVER_DIR / "data" / "greenhouse.db"
+# DEMO (chỉ để xem giao diện trên máy không có cảm biến): bảng dự báo hiện số GIẢ LẬP = số đo hiện tại ± 1–3 đơn vị,
+# web ghi rõ "DEMO". Số giả lập không ghi vào bảng đối chiếu / CSV / Google Sheet. Máy chạy thật để false.
+DEMO_FORECAST = _bool("DEMO_FORECAST", False)
 # File CSV dữ liệu gốc + dự báo & thực tế tự lưu trên máy (5 phút/lần)
 CSV_DIR = _str("CSV_DIR") or str(PROJECT_DIR / "DU_LIEU_CSV")
